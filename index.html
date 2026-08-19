@@ -136,9 +136,9 @@
   var DOME_R   = 0.95;    // 花球水平半径
   var DOME_FY  = 0.86;    // 竖向压扁
   var CAP      = 2.23;    // 球冠张角，> pi/2 表示花包到侧下方
-  var ROSES    = 22;      // 花头数量
-  var HEAD_R   = 0.380;   // 单朵花头半径
-  var ROSE_GAIN = 0.62;   // 花瓣亮度系数
+  var ROSES    = 26;      // 花头数量
+  var HEAD_R   = 0.215;   // 单朵花头半径。太大就糊成一片，分不出一朵一朵
+  var ROSE_GAIN = 0.95;   // 花瓣亮度系数
 
   // 包装纸锥
   var WRAP_TOP = -0.20;
@@ -153,8 +153,12 @@
 
   // 渲染
   var INT      = 0.950;   // 单粒子加色强度：调高会整团糊成死白
+  var SPLAT    = 0.56;   // 单粒子铺开的总能量。1.0 = 只是把一个像素摊成 2x2；
+                         // 调大整团更密实，调小回到噼里啪啦的噪点
   var FADE     = 0.78;    // 余晖衰减，越大拖尾越短
   var BLOOM    = 0.26;    // 辉光强度
+  var BUFDIV   = 1;       // 粒子缓冲降采样档位（1 = 半分辨率）。
+                          // 调回 0 会变回一层稀疏噪点，别动
   var RISE     = 1.90;    // 单粒子汇聚时长
   var JMASK    = 4095;
 
@@ -213,10 +217,10 @@
   function budget() {
     // 手机上缓冲被压到 46 万像素，粒子数得跟着提才有和桌面一样的密度。
     // 真跑不动的机器由 render 末尾的自适应降档兜底。
-    if (prefersReduced) return 70000;
-    if (isWeChat && isMobile) return 130000;
-    if (isMobile) return 165000;
-    return 260000;
+    if (prefersReduced) return 90000;
+    if (isWeChat && isMobile) return 190000;
+    if (isMobile) return 215000;
+    return 265000;
   }
 
   function buildBouquet(N) {
@@ -269,15 +273,46 @@ var lump = 1
       return [d[0] * DOME_R * k, DOME_Y + d[1] * DOME_R * DOME_FY * k, d[2] * DOME_R * k];
     }
 
-    /* ---------- 1. 花头 ---------- */
-    var nRose = Math.floor(N * 0.340);
+    // 沿"从花球中心出发的射线"做指数抖动。原视频那种毛茸茸的放射状边缘就是
+    // 这么来的：大多数粒子几乎不动，少数被甩得很远，于是拉出一条条须。
+    // 一半往里甩，顺带把花与花之间的洞填上。
+    var SCAT = [0, 0, 0];
+    function scatterR(x, y, z, beta) {
+      var f = beta * -Math.log(rng() + 1e-6);
+      if (f > 0.45) f = 0.45;              // 长尾封顶，否则甩出去变成满屏雪点
+      if (rng() < 0.5) f = -f * 0.55;
+      SCAT[0] = x + x * f;
+      SCAT[1] = y + (y - DOME_Y) * f;
+      SCAT[2] = z + z * f;
+      return SCAT;
+    }
+
+    /* ---------- 1. 花头 ----------
+       照着真实玫瑰的正面结构做，不是一个红盘子：
+       - 花瓣分 4 轮，从外到内 5 / 6 / 7 / 9 片，逐轮变小、错开半格；
+       - 外轮是少数几片大瓣，向外翻卷（reflex），所以正面轮廓是**星形有缺口**的，
+         不是一个圆——这一点决定了远看能不能认出"这是朵花"；
+       - 花心是很小一个紧卷的锥，颜色最深最饱和；
+       - 瓣缘接光偏白，瓣根压在别的瓣底下是暗的。
+       尺寸对着原视频量的：单朵约占花球宽的 11~14%。 */
+    var WHORL = [5, 6, 7, 9];          // 由外到内每轮的瓣数
+    var WHORL_R = [1.00, 0.70, 0.46, 0.26];   // 每轮的半径尺度
+    var WHORL_REFLEX = [-0.26, -0.06, 0.30, 0.72];  // 负=向外翻卷，正=向内合拢
+    var nRose = Math.floor(N * 0.395);
     var perRose = Math.floor(nRose / ROSES);
-    var TH_MAX = 15 * Math.PI;
+
+    // 各轮的粒子配额。不能按面积（rw²）分——那样最内轮只剩 4% 的粒子，
+    // 花心就没了。真实玫瑰花心的瓣叠得最密，所以这里只给外轮很轻的加权。
+    var wArea = [], wSum = 0;
+    for (var wi = 0; wi < WHORL.length; wi++) {
+      var a0 = 0.50 + 0.50 * WHORL_R[wi];
+      wArea.push(a0); wSum += a0;
+    }
 
     for (var ri = 0; ri < ROSES; ri++) {
-      var d = capDir(ri, ROSES, 0.20);
-      var c = domePos(d, 0.58 + rng() * 0.42);
-      var hr = HEAD_R * (0.80 + rng() * 0.38);
+      var d = capDir(ri, ROSES, 0.32);
+      var c = domePos(d, 0.50 + rng() * 0.34);
+      var hr = HEAD_R * (0.72 + rng() * 0.56);
 
       // 花头朝向：沿球冠法线，略带随机倾斜
       var ux = d[0] + (rng() - 0.5) * 0.30;
@@ -294,77 +329,124 @@ var lump = 1
       var fx = uy * rz - uz * ry, fy = uz * rx - ux * rz, fz = ux * ry - uy * rx;
 
       var spin = rng() * TAU;
-      var cs = Math.cos(spin), sn = Math.sin(spin);
+      var squash = 0.88 + rng() * 0.22;   // 每朵略微椭圆，免得排成一片正圆
+      var open = 0.72 + rng() * 0.56;     // 有的开得平，有的还收着
 
       for (var k = 0; k < perRose; k++) {
-        // 经典玫瑰曲面：theta=0 是最外层平摊的大瓣，theta 越大越往花心收拢。
-        var Aa = 0.075 + rng() * 0.925;
-        var vv = (Math.sqrt(Aa) - 0.274) / 0.726;
-        if (vv < 0) vv = 0;
-        var tsel = 1 - Math.pow(vv, 0.7407);
-        var th = TH_MAX * tsel;
-        var u = Math.pow(rng(), 0.75);
-        var q = 1 - ((3.6 * th) % TAU) / Math.PI;
-        var gq = 1.25 * q * q - 0.25;
-        var xs = 1 - 0.5 * gq * gq;
-        var ph = (Math.PI / 2) * Math.exp(-th / (8 * Math.PI));
-        var sph = Math.sin(ph), cph = Math.cos(ph);
-        var yy = 1.95653 * u * u * (1.27689 * u - 1) * (1.27689 * u - 1) * sph;
-        var rr2 = xs * (u * sph + yy * cph);
-        var hh = xs * (u * cph - yy * sph);
-        var lx = rr2 * Math.cos(th);
-        var lz = rr2 * Math.sin(th);
-        var rad2 = rr2 > 1 ? 1 : rr2;
-        var fill = 0.34 + 0.66 * Math.pow(rng(), 0.32);
-        var ly = (0.62 * Math.sqrt(1 - rad2 * rad2) + (hh - 0.30) * 0.15) * fill - 0.26;
-        lx *= fill; lz *= fill;
-
-        var lx2 = lx * cs - lz * sn;
-        var lz2 = lx * sn + lz * cs;
-
-        var px = c[0] + (rx * lx2 + ux * ly + fx * lz2) * hr;
-        var py = c[1] + (ry * lx2 + uy * ly + fy * lz2) * hr;
-        var pz = c[2] + (rz * lx2 + uz * ly + fz * lz2) * hr;
-
-        // 花心珊瑚红，外瓣浅珊瑚；瓣缝（xs 小）留红，出来才有花的纹理
-        var pale = clamp(1.12 * Math.pow(1 - tsel, 1.5) - 0.08, 0, 1);
-        var R = 242 + 8 * pale;
-        var G = 40 + 166 * pale;
-        var B = 30 + 158 * pale;
-        // 偶发金色反光：外层受光花瓣上的暖金星点（原视频花瓣边缘有金橙高光）
-        if (pale > 0.55 && rng() < 0.035) {
-          R = 255; G = 168 + 56 * rng(); B = 90;
+        // 选一轮
+        var pick = rng() * wSum, wsel = 0, acc = 0;
+        for (var ws = 0; ws < wArea.length; ws++) {
+          acc += wArea[ws];
+          if (pick <= acc) { wsel = ws; break; }
         }
-        // 花心额外提亮，好让红色从白色填充里透出来
-        var sh = (0.52 + 0.30 * xs + 0.14 * u * u * u) * (0.84 + 0.16 * (1 - tsel)) * ROSE_GAIN;
+        var np = WHORL[wsel];
+        var rw = WHORL_R[wsel];
+        var refl = WHORL_REFLEX[wsel];
+
+        // 选这一轮里的哪一片瓣。相邻两轮错开半格，瓣才互相盖住缝
+        var pi2 = Math.floor(rng() * np);
+        var pa = (pi2 + (wsel % 2) * 0.5) * TAU / np + spin + wsel * 0.42;
+
+        // 瓣内坐标：tt 从瓣根到瓣尖，uu 横跨瓣宽
+        var tt = Math.pow(rng(), 0.62);
+        var uu = rng() * 2 - 1;
+        // 瓣形：根部窄、中段最宽、尖端略收——这样瓣与瓣之间才留得出缺口
+        var wprof = Math.pow(Math.sin(Math.PI * Math.pow(tt, 0.72)), 0.48);
+        var hw = (Math.PI / np) * 1.16;
+        var aa = pa + uu * hw * wprof;
+
+        var rr = hr * rw * (0.26 + 0.80 * tt);
+
+        // 沿花头法线的高度：
+        //   花心是个锥（越靠内越高）；每片瓣自身兜成浅碗（两侧比中间高）；
+        //   瓣尖按 refl 翻卷——外轮往外往下翻，内轮往里合拢
+        var ly = hr * open * (
+              0.62 * Math.pow(1 - rw, 1.30)              // 花心的锥
+            + 0.15 * rw * uu * uu * wprof                // 兜起来的碗
+            + 0.34 * refl * rw * Math.pow(tt, 2.1)       // 瓣尖翻卷
+        );
+        ly += hr * (rng() - 0.5) * 0.070;                // 花瓣有厚度
+
+        var lx = Math.cos(aa) * rr * squash;
+        var lz = Math.sin(aa) * rr / squash;
+
+        var px = c[0] + rx * lx + ux * ly + fx * lz;
+        var py = c[1] + ry * lx + uy * ly + fy * lz;
+        var pz = c[2] + rz * lx + uz * ly + fz * lz;
+        if (rng() < 0.45) {                     // 花瓣边缘化开，别像贴上去的红盘子
+          var sp1 = scatterR(px, py, pz, 0.070);
+          px = sp1[0]; py = sp1[1]; pz = sp1[2];
+        }
+
+        // 颜色按"到花心的距离"给：花心深珊瑚红 → 中段亮珊瑚 → 外瓣粉白。
+        // rad 用实际半径而不是轮号，跨轮才连得上
+        var cz = clamp((rw - 0.22) / 0.78, 0, 1);
+        cz = clamp(cz * (0.70 + 0.38 * tt), 0, 1);   // 同一片瓣，瓣尖比瓣根浅
+        var R, G, B;
+        if (cz < 0.46) {                      // 花心到中段：深珊瑚红 → 亮珊瑚
+          var f0 = cz / 0.46;
+          R = 206 + 42 * f0; G = 30 + 62 * f0; B = 26 + 46 * f0;
+        } else {                              // 中段往外化进粉白
+          var f1 = Math.pow((cz - 0.46) / 0.54, 0.72);
+          R = 248 + 6 * f1; G = 92 + 106 * f1; B = 72 + 120 * f1;
+        }
+        // 瓣缘那道翻卷的边接光，是偏白的亮线。只给外轮——内轮也加就把花心洗白了
+        if (rw > 0.60) {
+          var rim = Math.pow(Math.abs(uu), 3.6) * (0.30 + 0.40 * tt);
+          R += (255 - R) * rim * 0.42;
+          G += (238 - G) * rim * 0.42;
+          B += (228 - B) * rim * 0.42;
+        }
+        // 偶发金色反光：外层受光花瓣上的暖金星点
+        if (cz > 0.55 && rng() < 0.026) { R = 255; G = 178 + 50 * rng(); B = 98; }
+
+        // 瓣根压在别的瓣底下 → 暗；瓣面朝外 → 亮
+        var sh = ROSE_GAIN * (0.34 + 0.66 * Math.pow(tt, 0.70))
+                           * (0.87 + 0.20 * uu * uu);
         var lit = 0.70 + 0.30 * (px * 0.6 + py * 0.8);
         sh *= clamp(lit, 0.50, 1.30);
-        push(px, py, pz, R * sh, G * sh, B * sh, rng() < 0.12);
+        push(px, py, pz, R * sh, G * sh, B * sh, rng() < 0.16);
       }
     }
 
-    /* ---------- 2. 花肉：大量很暗的粒子填满整个花球 ----------
-       要点是"多而暗"。少而亮会直接加色到死白，红花心就没了；
-       而且必须填成实心体，只铺一层壳的话中间会空、边缘会亮出一圈。 */
-    var nShell = Math.floor(N * 0.320);
-    for (var sh2 = 0; sh2 < nShell; sh2++) {
-      var dsh = capDir(sh2, nShell, 1.15);
-      // k 的立方根分布 = 体内均匀；再往外偏一点，外层花瓣更密
-      var ksh = 0.05 + Math.sqrt(rng()) * 0.98;
-      var spp = domePos(dsh, ksh);
-      var low = clamp((0.30 - spp[1]) * 1.9, 0, 1);   // 下缘偏绿
-      var warm = rng() < 0.34;                         // 掺一点粉，别全是白
-      var e2 = (0.32 + 0.46 * rng()) * (0.58 + 0.55 * ksh);
-      push(spp[0], spp[1], spp[2],
-           (warm ? 246 : 250 - 74 * low) * e2,
-           (warm ? 138 : 196 + 14 * low) * e2,
-           (warm ? 132 : 190 - 30 * low) * e2,
-           rng() < 0.16);
+    /* ---------- 2. 花肉：把花与花之间塞满的满天星绒毛 ----------
+       原视频整团是连续的，没有黑洞。三个要点缺一不可：
+       - **多**：不够就是一堆黑窟窿，花头看着像贴上去的；
+       - **暗**：亮了会把花头加色冲成粉白，红就没了；
+       - **待在花头那层壳里**：埋进深处只是加一层均匀底光，填不到缝。 */
+    var nShell = Math.floor(N * 0.295);
+    // 一簇一簇地放，不是均匀撒。满天星本来就是一小球一小球的，
+    // 均匀随机会渲染成一个光滑的白球——原视频那种绒毛感全靠这个成簇。
+    var shClu = Math.max(220, Math.floor(nShell / 26));
+    var perSh = Math.floor(nShell / shClu);
+    for (var ci2 = 0; ci2 < shClu; ci2++) {
+      var dsh = capDir(ci2 * 3 + 1, shClu * 3, 1.15);
+      // 体内均匀（k 取立方根）= 实心。铺成壳投影出来就是一个亮环加一个空心。
+      // 正中会不会烧白是曝光问题（SPLAT / e2），别拿挖空去治。
+      var ksh = 0.06 + Math.cbrt(rng()) * 0.96;
+      var cpp = domePos(dsh, ksh);
+      var low = clamp((0.34 - cpp[1]) * 1.7, 0, 1);   // 下缘偏绿
+      var warm = rng() < 0.10;
+      var puffR = 0.030 + rng() * 0.062;
+      var cluE = 0.60 + 0.52 * ksh;
+      for (var q2 = 0; q2 < perSh; q2++) {
+        var qa = rng() * TAU, qb = Math.acos(rng() * 2 - 1), qs = Math.sin(qb);
+        var qr = puffR * Math.pow(rng(), 0.40);
+        var e2 = (0.086 + 0.160 * rng()) * cluE;
+        var sp2 = scatterR(cpp[0] + qs * Math.cos(qa) * qr,
+                           cpp[1] + Math.cos(qb) * qr,
+                           cpp[2] + qs * Math.sin(qa) * qr, 0.105);
+        push(sp2[0], sp2[1], sp2[2],
+             (warm ? 246 : 250 - 86 * low) * e2,
+             (warm ? 150 : 198 + 12 * low) * e2,
+             (warm ? 144 : 192 - 42 * low) * e2,
+             rng() < 0.22);
+      }
     }
 
 
     /* ---------- 3. 满天星亮点：夹在花头之间的小白簇 ---------- */
-    var nGyp = Math.floor(N * 0.070);
+    var nGyp = Math.floor(N * 0.060);
     var clusters = Math.max(90, Math.floor(nGyp / 30));
     var perCl = Math.floor(nGyp / clusters);
     for (var ci = 0; ci < clusters; ci++) {
@@ -377,9 +459,10 @@ var lump = 1
         var rq = puff * Math.pow(rng(), 0.42);
         var sa1 = Math.sin(a2);
         var bright = 0.26 + 0.40 * rng();
-        push(cgp[0] + sa1 * Math.cos(a1) * rq,
-             cgp[1] + Math.cos(a2) * rq,
-             cgp[2] + sa1 * Math.sin(a1) * rq,
+        var sp3 = scatterR(cgp[0] + sa1 * Math.cos(a1) * rq,
+                           cgp[1] + Math.cos(a2) * rq,
+                           cgp[2] + sa1 * Math.sin(a1) * rq, 0.130);
+        push(sp3[0], sp3[1], sp3[2],
              (pinky ? 250 : 240) * bright,
              (pinky ? 208 : 234) * bright,
              (pinky ? 206 : 232) * bright,
@@ -388,13 +471,13 @@ var lump = 1
     }
 
     /* ---------- 3b. 花球内胆：让花团不透光 ---------- */
-    var nBody = Math.floor(N * 0.020);
+    var nBody = Math.floor(N * 0.022);
     for (var bd2 = 0; bd2 < nBody; bd2++) {
       var db = capDir(bd2, nBody, 1.6);
       var kb = 0.18 + Math.pow(rng(), 0.45) * 0.60;
       var bp = domePos(db, kb);
-      var warm = rng() < 0.62;
-      var ib = (0.13 + 0.24 * rng()) * (0.45 + 0.55 * kb);
+      var warm = rng() < 0.28;
+      var ib = (0.17 + 0.30 * rng()) * (0.45 + 0.55 * kb);
       push(bp[0], bp[1], bp[2],
            (warm ? 236 : 224) * ib,
            (warm ? 104 : 206) * ib,
@@ -403,7 +486,7 @@ var lump = 1
     }
 
     /* ---------- 3c. 花团与纸口之间的过渡裙边 ---------- */
-    var nSkirt = Math.floor(N * 0.055);
+    var nSkirt = Math.floor(N * 0.032);
     for (var sk = 0; sk < nSkirt; sk++) {
       var tsk = rng();
       var ask = rng() * TAU;
@@ -420,24 +503,25 @@ var lump = 1
 
 
     /* ---------- 4. 外缘雾气 + 放射花丝：毛茸茸的轮廓 ---------- */
-    var nHaze = Math.floor(N * 0.020);
+    var nHaze = Math.floor(N * 0.026);
     var fil = Math.floor(nHaze * 0.50);
     var nMist = nHaze - fil;
     for (var h = 0; h < nMist; h++) {
       var dh = capDir(h, nMist, 1.4);
-      var hp = domePos(dh, 0.75 + Math.pow(rng(), 1.5) * 0.42);
-      var bh2 = 0.16 + 0.34 * rng();
-      push(hp[0], hp[1], hp[2], 236 * bh2, 230 * bh2, 224 * bh2, false);
+      var hp = domePos(dh, 0.66 + Math.pow(rng(), 1.15) * 0.52);
+      var bh2 = 0.11 + 0.26 * rng();
+      var sp4 = scatterR(hp[0], hp[1], hp[2], 0.160);
+      push(sp4[0], sp4[1], sp4[2], 236 * bh2, 230 * bh2, 224 * bh2, false);
     }
     var fStrands = Math.max(60, Math.floor(fil / 14));
     var perF = Math.floor(fil / fStrands);
     for (var st2 = 0; st2 < fStrands; st2++) {
       var ds = capDir(st2 * 7 + 3, fStrands, 0.8);
       var bend = (rng() - 0.5) * 0.5;
-      var reach = 0.10 + rng() * 0.16;
+      var reach = 0.14 + rng() * 0.26;
       for (var fp = 0; fp < perF; fp++) {
         var tf = rng();
-        var sp = domePos(ds, 0.94 + tf * reach);
+        var sp = domePos(ds, 0.90 + tf * reach);
         var wob = Math.sin(tf * 4.0 + st2) * 0.030 * tf;
         var bf = (0.52 - tf * 0.30) * (0.6 + 0.8 * rng());
         push(sp[0] + wob, sp[1] + bend * tf * 0.10, sp[2] + wob * 0.7,
@@ -446,8 +530,8 @@ var lump = 1
     }
 
     /* ---------- 5. 叶片：灰绿，短，塞在花球下缘 ---------- */
-    var nLeaf = Math.floor(N * 0.025);
-    var LEAVES = 44;
+    var nLeaf = Math.floor(N * 0.062);
+    var LEAVES = 78;
     var perLeaf = Math.floor(nLeaf / LEAVES);
     for (var li = 0; li < LEAVES; li++) {
       var tl = (li + 0.5) / LEAVES;
@@ -457,7 +541,7 @@ var lump = 1
       var dly = Math.cos(phl);
       var dlz = Math.sin(phl) * Math.sin(thl);
       var base = domePos([dlx, dly, dlz], 0.74);
-      var len = 0.09 + rng() * 0.11;
+      var len = 0.13 + rng() * 0.17;
       var ex = dlx, ey = dly - 0.40, ez = dlz;
       var el2 = Math.sqrt(ex * ex + ey * ey + ez * ez) || 1;
       ex /= el2; ey /= el2; ez /= el2;
@@ -477,7 +561,7 @@ var lump = 1
     }
 
     /* ---------- 6. 包装纸：窄锥 + 折面高光 ---------- */
-    var nWrap = Math.floor(N * 0.070);
+    var nWrap = Math.floor(N * 0.042);
     for (var w = 0; w < nWrap; w++) {
       var tw = Math.pow(rng(), 0.55);
       var yw = WRAP_TIP + (WRAP_TOP - WRAP_TIP) * tw;
@@ -495,7 +579,7 @@ var lump = 1
     }
 
     /* ---------- 7. 花茎与缎带 ---------- */
-    var nStem = Math.floor(N * 0.045);
+    var nStem = Math.floor(N * 0.030);
     var nRib = Math.floor(nStem * 0.26);
     var STRANDS = 15;
     for (var sti = 0; sti < nStem - nRib; sti++) {
@@ -576,7 +660,11 @@ var lump = 1
     W = vw; H = vh;
     cv.width = W; cv.height = H;
 
-    bw = W; bh = H;
+    // 粒子缓冲比屏幕小一档，再平滑放大回去。
+    // 一颗粒子于是覆盖 4 倍的屏幕面积，粒子之间那些黑缝才填得满——
+    // 原视频是连成一片的奶油质地，1:1 写单像素只会得到一层椒盐噪点。
+    // 顺带 putImageData 的像素少了四分之三，比原来还快。
+    bw = Math.max(2, W >> BUFDIV); bh = Math.max(2, H >> BUFDIV);
     bcv = document.createElement("canvas");
     bcv.width = bw; bcv.height = bh;
     bctx = bcv.getContext("2d", { alpha: false });
@@ -584,7 +672,7 @@ var lump = 1
     u8 = img.data;
     u32 = new Uint32Array(u8.buffer);
 
-    sw = Math.max(2, bw >> 2); sh = Math.max(2, bh >> 2);
+    sw = Math.max(2, bw >> 1); sh = Math.max(2, bh >> 1);
     scv = document.createElement("canvas");
     scv.width = sw; scv.height = sh;
     sctx = scv.getContext("2d", { alpha: false });
@@ -592,6 +680,8 @@ var lump = 1
     gcv = document.createElement("canvas");
     gcv.width = W; gcv.height = H;
     gctx = gcv.getContext("2d", { alpha: false });
+    gctx.imageSmoothingEnabled = true;
+    gctx.imageSmoothingQuality = "high";
     gctx.fillStyle = "#000";
     gctx.fillRect(0, 0, W, H);
 
@@ -613,9 +703,13 @@ var lump = 1
 
     // 横屏按高度装下整个立方体；竖屏按宽度让花束占满画面，
     // 盒子的角会被切掉一点——视频里本来也是这样的取景。
-    scale = Math.min(bw * 0.315, bh * 0.3533);
+    var portrait = bh > bw * 1.1;
+    // 竖屏按宽度放到最大，让花束占满画面——盒子的角会被切掉，
+    // 视频里本来就是这个取景。之前按"整个盒子都要装下"算，
+    // 手机上花束只有屏高的三分之一，主体太小。
+    scale = portrait ? bw * 0.430 : Math.min(bw * 0.315, bh * 0.3533);
     cx = bw * 0.5;
-    cy = bh * (bh > bw * 1.1 ? 0.44 : 0.495);
+    cy = bh * (portrait ? 0.455 : 0.495);
   }
 
   /* ============================================================
@@ -724,6 +818,7 @@ var lump = 1
     var f7 = (frame * 7) | 0;
     var n = drawCount;
     var bw4 = bw << 2;
+    var bwm = bw - 1, bhm = bh - 1;
 
     for (var i = 0; i < n; i++) {
       var k = (t - dlA[i]) / RISE;
@@ -751,10 +846,10 @@ var lump = 1
       var D = -py * se + Z * ce;
 
       var s = FOV / (FOV + D);
-      var sx = (cx + X * s * sc) | 0;
-      if (sx < 0 || sx >= bw) continue;
-      var sy = (cy - Y * s * sc) | 0;
-      if (sy < 0 || sy >= bh) continue;
+      var fpx = cx + X * s * sc;
+      var fpy = cy - Y * s * sc;
+      var sx = fpx | 0, sy = fpy | 0;
+      if (sx < 0 || sx >= bwm || sy < 0 || sy >= bhm) continue;
 
       var gmul = INT * amp * (0.52 + 0.78 * (s - 0.72));
       if (gmul <= 0) continue;
@@ -766,14 +861,24 @@ var lump = 1
       if (kk < 0.08) kk = 0.08;
       var g2 = gmul * kk;
       var vr = crA[i] * g2, vg = cgA[i] * g2, vb = cbA[i] * g2;
-      u8[idx] += vr; u8[idx + 1] += vg; u8[idx + 2] += vb;
+
+      // 双线性铺到 2x2。原视频是 tkinter 的 create_rectangle，一颗占好几个
+      // 像素，所以整团是连片的实体；只写单像素会稀成一层噪点，花形就没了。
+      // 近处的颗粒铺得更开一点，等效于点精灵的透视缩放。
+      var wx = fpx - sx, wy = fpy - sy;
+      var sprd = SPLAT * (0.80 + 0.55 * (s - 0.72));
+      var e0 = (1 - wx) * (1 - wy) * sprd, e1 = wx * (1 - wy) * sprd;
+      var e2 = (1 - wx) * wy * sprd,       e3 = wx * wy * sprd;
+      var j1 = idx + 4, j2 = idx + bw4, j3 = j2 + 4;
+      u8[idx] += vr * e0; u8[idx + 1] += vg * e0; u8[idx + 2] += vb * e0;
+      u8[j1]  += vr * e1; u8[j1 + 1]  += vg * e1; u8[j1 + 2]  += vb * e1;
+      u8[j2]  += vr * e2; u8[j2 + 1]  += vg * e2; u8[j2 + 2]  += vb * e2;
+      u8[j3]  += vr * e3; u8[j3 + 1]  += vg * e3; u8[j3 + 2]  += vb * e3;
       if (bgA[i]) {
-        var h1 = vr * 0.5, h2 = vg * 0.5, h3 = vb * 0.5;
-        if (sx + 1 < bw) { u8[idx + 4] += h1; u8[idx + 5] += h2; u8[idx + 6] += h3; }
-        if (sy + 1 < bh) {
-          var i2 = idx + bw4;
-          u8[i2] += h1; u8[i2 + 1] += h2; u8[i2 + 2] += h3;
-        }
+        // 大颗粒再往外糊一圈，等于 3x3 的方块
+        var h1 = vr * 0.42 * sprd, h2 = vg * 0.42 * sprd, h3 = vb * 0.42 * sprd;
+        if (sx > 0) { var jl = idx - 4; u8[jl] += h1; u8[jl + 1] += h2; u8[jl + 2] += h3; }
+        if (sy > 0) { var ju = idx - bw4; u8[ju] += h1; u8[ju + 1] += h2; u8[ju + 2] += h3; }
       }
     }
 
