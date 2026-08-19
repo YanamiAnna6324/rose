@@ -70,25 +70,6 @@
     animation: pulse 1.9s ease-in-out infinite;
   }
   @keyframes pulse { 50% { transform: scale(1.5); opacity: .8; } }
-  .wechat-hint {
-    position: fixed; z-index: 6;
-    top: max(12px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
-    max-width: min(92vw, 420px); padding: 7px 12px; border-radius: 999px;
-    color: rgba(255, 226, 218, .5); font-size: 11px; letter-spacing: .08em; text-align: center;
-    background: rgba(10, 4, 3, .5); border: 1px solid rgba(180, 80, 60, .2);
-    opacity: 0; pointer-events: none;
-  }
-  .wechat-hint.show { opacity: 1; }
-  .replay {
-    position: fixed; z-index: 6;
-    right: max(14px, env(safe-area-inset-right));
-    bottom: max(14px, env(safe-area-inset-bottom));
-    padding: 9px 18px; border-radius: 999px; font-size: 12px; letter-spacing: .2em; text-indent: .2em;
-    color: rgba(248, 224, 216, .7); background: rgba(24, 8, 6, .5);
-    border: 1px solid rgba(200, 90, 70, .26); opacity: 0; pointer-events: none;
-    transition: opacity .8s ease;
-  }
-  .replay.show { opacity: 1; pointer-events: auto; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -103,7 +84,6 @@
   </div>
 </div>
 
-<div class="wechat-hint" id="wechatHint">若画面空白：右上角 ··· → 在浏览器打开</div>
 
 <div id="gate">
   <h2>点一下，花开</h2>
@@ -111,7 +91,6 @@
   <div class="pulse"></div>
 </div>
 
-<div class="replay" id="replay">再绽放一次</div>
 
 <script>
 (function () {
@@ -149,7 +128,12 @@
   // 相机
   var FOV      = 7.0;
   var ELEV     = 0.200;      // 俯角
-  var SPIN     = TAU / 46;   // 每秒转动弧度
+  var SPIN     = TAU / 58;   // 每秒转动弧度（拖动可叠加）
+  // 周围飘散粒子的动态。花球本体不动，只有外围在飘——
+  // 静止的尘埃看着像画上去的，一动整幅就活了。
+  var AMB_SWIRL = 0.085;   // 环流半径
+  var AMB_RISE  = 0.026;   // 上浮速度（每秒走完整程的比例）
+  var AMB_SPAN  = 0.62;    // 上浮行程
 
   // 渲染
   var INT      = 0.950;   // 单粒子加色强度：调高会整团糊成死白
@@ -184,15 +168,12 @@
   var ctx = cv.getContext("2d", { alpha: false });
   var gate = document.getElementById("gate");
   var caption = document.getElementById("caption");
-  var replay = document.getElementById("replay");
-  var wechatHint = document.getElementById("wechatHint");
 
   document.getElementById("titleText").textContent = CONFIG.title;
   document.getElementById("nameText").textContent = CONFIG.name;
   document.getElementById("subText").textContent = CONFIG.subtitle;
   document.getElementById("gateSub").textContent = CONFIG.subtitle;
   document.title = CONFIG.title + " · " + CONFIG.name;
-  if (isWeChat) wechatHint.classList.add("show");
 
   /* ============================================================
      工具
@@ -213,6 +194,8 @@
      ============================================================ */
   var P = null;
   var COUNT = 0;
+  // 标记"周围飘的粒子"，渲染时额外走一段随时间变化的漂移 + 明灭
+  var AMB_ON = 0;
 
   function budget() {
     // 手机上缓冲被压到 46 万像素，粒子数得跟着提才有和桌面一样的密度。
@@ -228,11 +211,12 @@
     var tx = new Float32Array(N), ty = new Float32Array(N), tz = new Float32Array(N);
     var ox = new Float32Array(N), oy = new Float32Array(N), oz = new Float32Array(N);
     var cr = new Float32Array(N), cg = new Float32Array(N), cb = new Float32Array(N);
-    var dl = new Float32Array(N), bg = new Uint8Array(N);
+    var dl = new Float32Array(N), bg = new Uint8Array(N), am = new Uint8Array(N);
     var n = 0;
 
     function push(x, y, z, r, g, b, big) {
       if (n >= N) return;
+      am[n] = AMB_ON;
       tx[n] = x; ty[n] = y; tz[n] = z;
       cr[n] = r; cg[n] = g; cb[n] = b;
       bg[n] = big ? 1 : 0;
@@ -502,6 +486,7 @@ var lump = 1
     }
 
 
+    AMB_ON = 1;   // 以下是外围飘散的部分
     /* ---------- 4. 外缘雾气 + 放射花丝：毛茸茸的轮廓 ---------- */
     var nHaze = Math.floor(N * 0.026);
     var fil = Math.floor(nHaze * 0.50);
@@ -529,6 +514,7 @@ var lump = 1
       }
     }
 
+    AMB_ON = 0;   // 回到花束本体
     /* ---------- 5. 叶片：灰绿，短，塞在花球下缘 ---------- */
     var nLeaf = Math.floor(N * 0.062);
     var LEAVES = 78;
@@ -604,6 +590,7 @@ var lump = 1
            184 * bb, 68 * bb, 56 * bb, rng() < 0.10);
     }
 
+    AMB_ON = 1;
     /* ---------- 8. 飘散尘埃：贴着花团，别撒满整个盒子 ---------- */
     while (n < N) {
       var ad = rng() * TAU;
@@ -625,10 +612,12 @@ var lump = 1
         var arr = A[ai], tmp = arr[q]; arr[q] = arr[w2]; arr[w2] = tmp;
       }
       var tb2 = bg[q]; bg[q] = bg[w2]; bg[w2] = tb2;
+      var ta2 = am[q]; am[q] = am[w2]; am[w2] = ta2;
     }
+    AMB_ON = 0;
 
     COUNT = n;
-    return { tx: tx, ty: ty, tz: tz, ox: ox, oy: oy, oz: oz,
+    return { am: am, tx: tx, ty: ty, tz: tz, ox: ox, oy: oy, oz: oz,
              cr: cr, cg: cg, cb: cb, dl: dl, bg: bg };
   }
 
@@ -707,9 +696,11 @@ var lump = 1
     // 竖屏按宽度放到最大，让花束占满画面——盒子的角会被切掉，
     // 视频里本来就是这个取景。之前按"整个盒子都要装下"算，
     // 手机上花束只有屏高的三分之一，主体太小。
-    scale = portrait ? bw * 0.430 : Math.min(bw * 0.315, bh * 0.3533);
+    scale = portrait ? bw * 0.512 : Math.min(bw * 0.340, bh * 0.392);
     cx = bw * 0.5;
-    cy = bh * (portrait ? 0.455 : 0.495);
+    // 按**花球**居中，不是按立方体。花团的重心在世界坐标 y≈0.26，
+    // 拿立方体居中的话球会偏上，底下空出一大截。
+    cy = bh * (portrait ? 0.455 : 0.495) + 0.26 * scale;
   }
 
   /* ============================================================
@@ -717,6 +708,10 @@ var lump = 1
      ============================================================ */
   var az = 0.55, elv = ELEV;
   var pxAim = 0, pyAim = 0, pxCur = 0, pyCur = 0;
+  // 拖动旋转：dragAz/dragEl 叠在自转之上，松手后惯性滑行，
+  // 静置久了慢慢归零把镜头交还给自转。
+  var dragAz = 0, dragEl = 0, dragAzV = 0, dragElV = 0;
+  var dragging = false, dLastX = 0, dLastY = 0, dIdleAt = 0;
 
   var BOXV = [];
   for (var bi = 0; bi < 8; bi++) {
@@ -764,7 +759,6 @@ var lump = 1
     frame = 0;
     captionShown = false;
     caption.classList.remove("show");
-    replay.classList.remove("show");
     gctx.globalCompositeOperation = "source-over";
     gctx.globalAlpha = 1;
     gctx.fillStyle = "#000";
@@ -802,10 +796,21 @@ var lump = 1
       fadeT0 = now;
     }
 
-    var a = az + (STILL ? 0 : t * SPIN) + pxCur * 0.42;
+    // 拖动惯性 + 静置回正
+    if (!dragging) {
+      dragAz += dragAzV; dragEl += dragElV;
+      dragAzV *= 0.945; dragElV *= 0.945;
+      if (Math.abs(dragAzV) < 0.00018) dragAzV = 0;
+      if (Math.abs(dragElV) < 0.00018) dragElV = 0;
+      if (dragAzV === 0 && now - dIdleAt > 3000) {
+        dragAz *= 0.991; dragEl *= 0.991;
+      }
+    }
+    dragEl = clamp(dragEl, -0.50, 0.50);
+    var a = az + (STILL ? 0 : t * SPIN) + pxCur * 0.42 + dragAz;
     // 呼吸式运镜：整体轻微推近拉远 + 上下浮动，模拟原视频的手持呼吸感
     var breathe = 1 + 0.028 * Math.sin(t * 0.55) + 0.016 * Math.sin(t * 0.23 + 1.1);
-    var e = elv + pyCur * 0.16 + 0.020 * Math.sin(t * 0.31 + 0.6);
+    var e = elv + pyCur * 0.16 + 0.020 * Math.sin(t * 0.31 + 0.6) + dragEl;
     var sc = scale * breathe;
     var ca = Math.cos(a), sa = Math.sin(a), ce = Math.cos(e), se = Math.sin(e);
 
@@ -813,7 +818,7 @@ var lump = 1
 
     var tx = P.tx, ty = P.ty, tz = P.tz;
     var oxA = P.ox, oyA = P.oy, ozA = P.oz;
-    var crA = P.cr, cgA = P.cg, cbA = P.cb, dlA = P.dl, bgA = P.bg;
+    var crA = P.cr, cgA = P.cg, cbA = P.cb, dlA = P.dl, bgA = P.bg, amA = P.am;
     var jitAmp = 0.010 + 0.004 * Math.sin(t * 0.7);
     var f7 = (frame * 7) | 0;
     var n = drawCount;
@@ -839,6 +844,16 @@ var lump = 1
       px += JIT[ji] * jitAmp;
       py += JIT[ji + 1] * jitAmp;
       pz += JIT[ji + 2] * jitAmp;
+
+      // 周围飘的粒子：慢速环流 + 上浮 + 明灭。花球本体一动不动。
+      // 上浮用取模而不是一直加，飘到顶就从底下回来，看着是循环的气流。
+      if (amA[i]) {
+        var ph = JIT[ji] * 3.1416;
+        px += Math.sin(t * 0.31 + ph) * AMB_SWIRL;
+        pz += Math.cos(t * 0.27 + ph * 1.4) * AMB_SWIRL;
+        py += ((t * AMB_RISE + JIT[ji + 1] * 0.5 + 0.5) % 1) * AMB_SPAN - AMB_SPAN * 0.5;
+        amp *= 0.38 + 0.62 * (0.5 + 0.5 * Math.sin(t * 1.05 + ph * 2.3));
+      }
 
       var X = px * ca - pz * sa;
       var Z = px * sa + pz * ca;
@@ -914,7 +929,6 @@ var lump = 1
     if (!captionShown && t > 5.6) {
       captionShown = true;
       caption.classList.add("show");
-      replay.classList.add("show");
     }
 
     var ms = performance.now() - t0;
@@ -950,8 +964,28 @@ var lump = 1
 
   gate.addEventListener("click", start);
   gate.addEventListener("touchend", function (ev) { ev.preventDefault(); start(); }, { passive: false });
-  replay.addEventListener("click", function (ev) { ev.stopPropagation(); softReset(); });
-  cv.addEventListener("click", function () { if (started) softReset(); });
+
+  function dragStart(x, y) {
+    dragging = true; dLastX = x; dLastY = y;
+    dragAzV = 0; dragElV = 0; dIdleAt = performance.now();
+  }
+  function dragMove(x, y) {
+    if (!dragging) return;
+    var dx = x - dLastX, dy = y - dLastY;
+    dragAz -= dx * 0.0060;
+    dragEl = clamp(dragEl + dy * 0.0034, -0.50, 0.50);
+    dragAzV = -dx * 0.00105;
+    dragElV = dy * 0.00058;
+    dLastX = x; dLastY = y; dIdleAt = performance.now();
+  }
+  function dragEnd() { if (dragging) { dragging = false; dIdleAt = performance.now(); } }
+  cv.addEventListener("pointerdown", function (ev) {
+    cv.setPointerCapture(ev.pointerId); dragStart(ev.clientX, ev.clientY);
+  });
+  cv.addEventListener("pointermove", function (ev) { dragMove(ev.clientX, ev.clientY); });
+  cv.addEventListener("pointerup", dragEnd);
+  cv.addEventListener("pointercancel", dragEnd);
+  window.addEventListener("blur", dragEnd);
 
   function aim(clientX, clientY) {
     var r = stage.getBoundingClientRect();

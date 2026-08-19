@@ -17,8 +17,16 @@ streamlit run streamlit_app.py
 → New app → 选仓库 / 分支 / `streamlit_app.py`。不需要任何 Secrets——
 页面没有后端，Python 那层只是个壳。
 
-外壳顶上有个版本选择器，四版都能切；也可以用 `?v=结合版` 直接指定，
+**线上只发粒子版**（`index.html`）。其它三版留在仓库里备查，不上线。
 `?play=1` 跳过点击、`?still=1` 定格。
+
+外壳刻意不用任何 Streamlit 组件。实测手机首屏：页面本身 41KB / 1 个请求 /
+4G 下 0.4 秒，套上 Streamlit 变成 **2.7MB / 63 个请求 / 5.9 秒**。那 2.7MB 里
+`index.js` 909KB + `protobuf.js` 738KB 是内核，去不掉——试过把
+`st.markdown` / `st.radio` 全撤掉换成从 iframe 内部注入，**传输量和时间纹丝不动**，
+那些 chunk 是急加载的，不是用了组件才拉的。缓存热了之后只要 0.19 秒，
+但送礼这件事第一次打开才是唯一重要的那次。真嫌慢就别套 Streamlit，
+直接把 `index.html` 传静态托管。
 
 两处非做不可的适配，改的时候别踩回去：
 
@@ -56,6 +64,9 @@ python -m http.server 8000
 
 - 照片版：`http://localhost:8000/index_photo.html`（`#play` 跳过点击，`#still` 定格）
 - 泼溅版：`http://localhost:8000/index_splat.html`（`?play=1` 跳过点击，`?still=1` 定格）
+
+粒子版的交互：**按住拖动可以旋转**（带惯性，松手后慢慢回到自转）。
+已去掉点击重播和「用浏览器打开」的提示。
 - 粒子版：`http://localhost:8000/index.html`（`#play` 跳过点击，`#still` 定格）
 
 ## 照片转 3D 版（`index_photo.html`）
