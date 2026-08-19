@@ -18,3 +18,8 @@ venv/
 .vscode/
 .idea/
 .DS_Store
+
+# 小红书原始截图：里面有原作者的昵称、头像和二维码。
+# 处理好的花束已经内嵌在 index_photo.html 里，原图不需要进公开仓库。
+# 要重跑 dl/prep_photo.py 的话，本地留着这个文件即可。
+roseflower2.jpg

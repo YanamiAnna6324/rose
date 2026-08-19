@@ -123,14 +123,18 @@
 <div id="progress" hidden></div>
 <div class="scene" id="spinner" hidden></div>
 
-<script src="splat-render.js"></script>
+<script src="static/splat-render.js"></script>
 <script>
 (function () {
   "use strict";
   var isWeChat = /MicroMessenger/i.test(navigator.userAgent);
   var params = new URLSearchParams(location.search);
-  var AUTOPLAY = params.get("play") === "1" || /play/i.test(location.hash);
-  var STILL = params.get("still") === "1" || /still/i.test(location.hash);
+  // Streamlit 外壳把页面塞进 iframe（srcdoc），里面读不到外层地址栏的
+  // hash 和 query，所以允许外壳先写一个 window.__ROSE_HASH 进来。
+  // 直接开这个文件时它是空的，不影响。
+  var shellHash = window.__ROSE_HASH || "";
+  var AUTOPLAY = params.get("play") === "1" || /play/i.test(location.hash) || /play/i.test(shellHash);
+  var STILL = params.get("still") === "1" || /still/i.test(location.hash) || /still/i.test(shellHash);
 
   var gate = document.getElementById("gate");
   var blackout = document.getElementById("blackout");

@@ -6,6 +6,34 @@
 - **`index_splat.html`（3D 高斯泼溅版）**——真正的 3D 花束：用 [TripoSplat](https://github.com/VAST-AI-Research/TripoSplat) 从一张玫瑰照片生成 26 万颗 3D 高斯点，浏览器里 WebGL 实时渲染，钟摆式左右运镜 + 呼吸推近。配 `rose.splat`（8MB）和 `splat-render.js`（MIT，[antimatter15/splat](https://github.com/antimatter15/splat) 定制版）。
 - **`index.html`（粒子版）**——Canvas 2D 粒子堆出来的花束：近黑冷调背景、细白线框立方体、珊瑚红花头带金色反光。整束缓慢自转 + 呼吸式推近，绽放后定妆停留。
 
+## 上线（Streamlit Cloud）
+
+```bash
+pip install -r requirements.txt
+streamlit run streamlit_app.py
+```
+
+上线：推到公开 GitHub 仓库 → [share.streamlit.io](https://share.streamlit.io)
+→ New app → 选仓库 / 分支 / `streamlit_app.py`。不需要任何 Secrets——
+页面没有后端，Python 那层只是个壳。
+
+外壳顶上有个版本选择器，四版都能切；也可以用 `?v=结合版` 直接指定，
+`?play=1` 跳过点击、`?still=1` 定格。
+
+两处非做不可的适配，改的时候别踩回去：
+
+- **`window.__ROSE_HASH`**：外壳用 `components.html` 把页面塞进 srcdoc iframe，
+  里面读不到外层地址栏的 hash 和 query，所以四个页面都留了这个钩子。
+  直接双击 html 时它是空的，不影响。
+- **`window.__ROSE_BASE` + `static/`**：泼溅版要外部加载 `rose.splat`（8MB）和
+  `splat-render.js`，srcdoc 里 `location.href` 是 `"about:srcdoc"`，
+  相对路径一律解析不到、拿它当基址还会直接抛错。所以这两个文件放在 `static/`
+  走 Streamlit 的静态托管（`enableStaticServing`），基址由外壳从
+  `parent.location.origin` 算好写进去。另外那个 `<script src>` 得用
+  `document.write` 换成绝对地址——改成 appendChild 异步加载会打乱执行顺序。
+
+冷启动：应用闲置会休眠，第一次打开可能要等半分钟白屏。发之前自己先点一次叫醒它。
+
 ## 怎么给她打开
 
 微信里请发 **https 链接**，不要发 HTML 文件。微信会把 HTML 当附件，不会当网页跑。

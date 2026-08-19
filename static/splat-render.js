@@ -295,6 +295,107 @@ function translate4(a, x, y, z) {
     ];
 }
 
+function norm3(x, y, z) {
+    const l = Math.hypot(x, y, z) || 1;
+    return [x / l, y / l, z / l];
+}
+
+// antimatter15/splat 的投影用 clip.w = z，相机朝 +Z 看，不是 OpenGL 的 -Z
+function lookAtZForward(eye, target, up) {
+    const z = norm3(target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]);
+    let x = [
+        up[1] * z[2] - up[2] * z[1],
+        up[2] * z[0] - up[0] * z[2],
+        up[0] * z[1] - up[1] * z[0],
+    ];
+    let xl = Math.hypot(x[0], x[1], x[2]);
+    if (xl < 1e-6) {
+        up = Math.abs(z[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+        x = [
+            up[1] * z[2] - up[2] * z[1],
+            up[2] * z[0] - up[0] * z[2],
+            up[0] * z[1] - up[1] * z[0],
+        ];
+        xl = Math.hypot(x[0], x[1], x[2]) || 1;
+    }
+    x = [x[0] / xl, x[1] / xl, x[2] / xl];
+    const y = [
+        z[1] * x[2] - z[2] * x[1],
+        z[2] * x[0] - z[0] * x[2],
+        z[0] * x[1] - z[1] * x[0],
+    ];
+    return [
+        x[0], y[0], z[0], 0,
+        x[1], y[1], z[1], 0,
+        x[2], y[2], z[2], 0,
+        -(x[0] * eye[0] + x[1] * eye[1] + x[2] * eye[2]),
+        -(y[0] * eye[0] + y[1] * eye[1] + y[2] * eye[2]),
+        -(z[0] * eye[0] + z[1] * eye[1] + z[2] * eye[2]),
+        1,
+    ];
+}
+
+function fitSplatCamera(u8, nbytes) {
+    const n = Math.floor(nbytes / 32);
+    if (n < 2048) return false;
+    const dv = new DataView(u8.buffer, u8.byteOffset, n * 32);
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    let kept = 0;
+    for (let i = 0; i < n; i++) {
+        if (u8[i * 32 + 27] < 64) continue;
+        const x = dv.getFloat32(i * 32, true);
+        const y = dv.getFloat32(i * 32 + 4, true);
+        const z = dv.getFloat32(i * 32 + 8, true);
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        if (z < minZ) minZ = z;
+        if (z > maxZ) maxZ = z;
+        kept++;
+    }
+    if (kept < 512) return false;
+    const tx = (minX + maxX) / 2;
+    const ty = (minY + maxY) / 2;
+    const tz = (minZ + maxZ) / 2;
+    const ex = maxX - minX, ey = maxY - minY, ez = maxZ - minZ;
+    let axis = 0;
+    if (ey <= ex && ey <= ez) axis = 1;
+    else if (ez <= ex && ez <= ey) axis = 2;
+    let pA = 0, pN = 0, mA = 0, mN = 0;
+    const tc = axis === 0 ? tx : axis === 1 ? ty : tz;
+    for (let i = 0; i < n; i++) {
+        const a = u8[i * 32 + 27];
+        if (a < 64) continue;
+        const v = dv.getFloat32(i * 32 + axis * 4, true);
+        if (v >= tc) {
+            pA += a;
+            pN++;
+        } else {
+            mA += a;
+            mN++;
+        }
+    }
+    const sign = pA / (pN || 1) >= mA / (mN || 1) ? 1 : -1;
+    const nx = axis === 0 ? sign : 0;
+    const ny = axis === 1 ? sign : 0;
+    const nz = axis === 2 ? sign : 0;
+    const size = Math.max(ex, ey, ez);
+    const dist = Math.max(1.25, size * 1.78);
+    const lift = dist * 0.11;
+    const target = [tx, ty - ey * 0.06, tz];
+    roseCam = { target, n: [nx, ny, nz], dist, lift, size, axis };
+    const eye = [
+        target[0] + nx * dist,
+        target[1] + ny * dist + lift,
+        target[2] + nz * dist,
+    ];
+    defaultViewMatrix = lookAtZForward(eye, target, [0, 1, 0]);
+    viewMatrix = defaultViewMatrix;
+    return true;
+}
+
 function createWorker(self) {
     let buffer;
     let vertexCount = 0;
@@ -731,19 +832,26 @@ void main () {
 
 `.trim();
 
+// 占位：splat 载入后 fitSplatCamera 会改成对着花束正面
 let defaultViewMatrix = [
     0.47, 0.04, 0.88, 0, -0.11, 0.99, 0.02, 0, -0.88, -0.11, 0.47, 0, -0.08,
     0.1, 2.45, 1,
 ];
 let viewMatrix = defaultViewMatrix;
+let roseCam = null;
+let hashLockedCamera = false;
 async function main() {
     let carousel = true;
     const params = new URLSearchParams(location.search);
     try {
         viewMatrix = JSON.parse(decodeURIComponent(location.hash.slice(1)));
         carousel = false;
+        hashLockedCamera = true;
     } catch (err) {}
-    const url = new URL(params.get("url") || "rose.splat", location.href);
+    // Streamlit 外壳把页面塞进 srcdoc iframe，那里的 location.href 是
+    // "about:srcdoc"，拿它当基址会直接抛错。外壳会写一个 __ROSE_BASE 进来。
+    const base = window.__ROSE_BASE || location.href;
+    const url = new URL(params.get("url") || "static/rose.splat", base);
     const req = await fetch(url, {
         mode: "cors", // no-cors, *cors, same-origin
         credentials: "omit", // include, *same-origin, omit
@@ -1324,24 +1432,40 @@ async function main() {
         viewMatrix = invert4(inv);
 
         if (carousel) {
-            let inv = invert4(defaultViewMatrix);
-
-            // 七夕定制运镜：慢速环绕 + 呼吸推近 + 轻微漂浮
-            // （对照粒子版页面与参考视频的手持呼吸感）
             const ct = (Date.now() - start) / 1000;
-            inv = rotate4(inv, -0.065, 1, 0, 0); // 轻微俯角，像低头看花束
-            // 钟摆式左右摆动：模型是单面薄壳，背面是空的，
-            // 全周环绕会转到背面消失；左右 ±24° 摆动永远正面朝前，
-            // 也和原视频「花束左右缓慢漂移」的运镜一致
-            inv = rotate4(inv, Math.sin(ct * 0.22) * 0.26, 0, 1, 0);
-            inv = translate4(
-                inv,
-                Math.sin(ct * 0.40) * 0.045,
-                Math.sin(ct * 0.31 + 0.6) * 0.028,
-                Math.sin(ct * 0.23 + 1.1) * 0.12,
-            );
-
-            viewMatrix = invert4(inv);
+            if (roseCam) {
+                // 绕花束垂直轴钟摆，始终对着较厚的那一面。
+                // 单图高斯是薄壳，全周 yaw 会看到侧面/空背。
+                const yaw = Math.sin(ct * 0.22) * 0.28;
+                const breathe = 1 + Math.sin(ct * 0.23 + 1.1) * 0.06;
+                const bobY = Math.sin(ct * 0.31 + 0.6) * 0.018;
+                const bobX = Math.sin(ct * 0.4) * 0.02;
+                const c = Math.cos(yaw);
+                const s = Math.sin(yaw);
+                const nx = roseCam.n[0];
+                const ny = roseCam.n[1];
+                const nz = roseCam.n[2];
+                const rx = c * nx + s * nz;
+                const rz = -s * nx + c * nz;
+                const dist = roseCam.dist * breathe;
+                const eye = [
+                    roseCam.target[0] + rx * dist + bobX,
+                    roseCam.target[1] + ny * dist + roseCam.lift + bobY,
+                    roseCam.target[2] + rz * dist,
+                ];
+                viewMatrix = lookAtZForward(eye, roseCam.target, [0, 1, 0]);
+            } else {
+                let inv = invert4(defaultViewMatrix);
+                inv = rotate4(inv, -0.065, 1, 0, 0);
+                inv = rotate4(inv, Math.sin(ct * 0.22) * 0.26, 0, 1, 0);
+                inv = translate4(
+                    inv,
+                    Math.sin(ct * 0.4) * 0.045,
+                    Math.sin(ct * 0.31 + 0.6) * 0.028,
+                    Math.sin(ct * 0.23 + 1.1) * 0.12,
+                );
+                viewMatrix = invert4(inv);
+            }
         }
 
         if (isJumping) {
@@ -1386,6 +1510,7 @@ async function main() {
             loaded: vertexCount > 0,
             total: Math.floor(splatData.length / rowLength),
             fps: Math.round(avgFps),
+            cam: roseCam,
             resetCarousel: function () {
                 start = Date.now() + 1200;
                 carousel = true;
@@ -1432,6 +1557,7 @@ async function main() {
                     // ply file magic header means it should be handled differently
                     worker.postMessage({ ply: splatData.buffer, save: true });
                 } else {
+                    if (!hashLockedCamera) fitSplatCamera(splatData, splatData.length);
                     worker.postMessage({
                         buffer: splatData.buffer,
                         vertexCount: Math.floor(splatData.length / rowLength),
@@ -1446,6 +1572,7 @@ async function main() {
         try {
             viewMatrix = JSON.parse(decodeURIComponent(location.hash.slice(1)));
             carousel = false;
+            hashLockedCamera = true;
         } catch (err) {}
     });
 
@@ -1473,6 +1600,15 @@ async function main() {
         splatData.set(value, bytesRead);
         bytesRead += value.length;
 
+        if (
+            !hashLockedCamera &&
+            !isPly(splatData) &&
+            ((roseCam == null && bytesRead > 32 * 80000) ||
+                bytesRead === splatData.length)
+        ) {
+            fitSplatCamera(splatData, bytesRead);
+        }
+
         if (vertexCount > lastVertexCount) {
             if (!isPly(splatData)) {
                 worker.postMessage({
@@ -1488,6 +1624,7 @@ async function main() {
             // ply file magic header means it should be handled differently
             worker.postMessage({ ply: splatData.buffer, save: false });
         } else {
+            if (!hashLockedCamera) fitSplatCamera(splatData, bytesRead);
             worker.postMessage({
                 buffer: splatData.buffer,
                 vertexCount: Math.floor(bytesRead / rowLength),

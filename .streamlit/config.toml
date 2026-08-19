@@ -1,0 +1,17 @@
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+
+[theme]
+base = "dark"
+backgroundColor = "#000000"
+secondaryBackgroundColor = "#0d0b0d"
+primaryColor = "#d8384a"
+textColor = "#f0e7e5"
+
+[server]
+# 泼溅版要外部加载 rose.splat 和 splat-render.js，srcdoc iframe 里
+# 相对路径解析不到，所以走 Streamlit 的静态托管（/app/static/...）
+enableStaticServing = true
