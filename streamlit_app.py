@@ -19,15 +19,15 @@ HERE = Path(__file__).parent
 
 # 顺序就是选择器上的顺序，第一个是默认
 VERSIONS = {
-    "结合版": ("index_mix.html", "粒子的圆球形 + 照片的真实配色，可拖动旋转"),
-    "照片版": ("index_photo.html", "照片抠图后充气成立体，可拖动旋转"),
-    "粒子版": ("index.html", "手工建模的粒子花束，自转 + 呼吸运镜"),
-    "泼溅版": ("index_splat.html", "TripoSplat 生成的 3D 高斯泼溅，WebGL 渲染"),
+    "结合版": "index_mix.html",
+    "照片版": "index_photo.html",
+    "粒子版": "index.html",
+    "泼溅版": "index_splat.html",
 }
 
 # 选择器占的高度，iframe 用 100vh 减掉它。
 # 不减的话页面会多出一条滚动条，手机上花束会被顶下去半截。
-BAR_PX = 74
+BAR_PX = 46
 
 CHROME_CSS = """
 <style>
@@ -136,8 +136,7 @@ def main() -> None:
 
     choice = st.radio("版本", names, index=index, horizontal=True,
                       label_visibility="collapsed")
-    fname, blurb = VERSIONS[choice]
-    st.caption(blurb)
+    fname = VERSIONS[choice]
 
     if not (HERE / fname).exists():
         st.error("找不到 %s" % fname)
