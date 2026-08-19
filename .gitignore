@@ -1,0 +1,18 @@
+# 抓参考视频时的中间产物，跟页面本身无关
+dl/
+cookies.txt
+share.html
+jina.txt
+*.json
+!.streamlit/*.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 编辑器
+.vscode/
+.idea/
+.DS_Store
