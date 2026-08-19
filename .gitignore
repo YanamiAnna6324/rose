@@ -1,5 +1,7 @@
 # 抓参考视频时的中间产物，跟页面本身无关
-dl/
+dl/*
+# prep_photo.py 不是中间产物，是 index_photo.html 的素材流水线，要跟进版本
+!dl/prep_photo.py
 cookies.txt
 share.html
 jina.txt

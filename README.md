@@ -1,8 +1,9 @@
 # 七夕玫瑰花束
 
-两个版本，都是纯前端单页，无 CDN、无外链字体，微信内置浏览器能直接跑：
+三个版本，都是纯前端单页，无 CDN、无外链字体，微信内置浏览器能直接跑：
 
-- **`index_splat.html`（3D 高斯泼溅版，推荐）**——真正的 3D 花束：用 [TripoSplat](https://github.com/VAST-AI-Research/TripoSplat) 从一张玫瑰照片生成 26 万颗 3D 高斯点，浏览器里 WebGL 实时渲染，钟摆式左右运镜 + 呼吸推近。配 `rose.splat`（8MB）和 `splat-render.js`（MIT，[antimatter15/splat](https://github.com/antimatter15/splat) 定制版）。
+- **`index_photo.html`（照片转 3D 版）**——把 `roseflower2.jpg` 里那束真花抠出来立体化：抠图 → 剪影充气成有厚度的形体 → 亮度当微浮雕 → 从高度场求法线做实时光照。花束固定在正中，**按住拖动可以转**，松手后缓缓回正。单文件 164KB（图片以 data URI 内嵌），不依赖任何外部资源。
+- **`index_splat.html`（3D 高斯泼溅版）**——真正的 3D 花束：用 [TripoSplat](https://github.com/VAST-AI-Research/TripoSplat) 从一张玫瑰照片生成 26 万颗 3D 高斯点，浏览器里 WebGL 实时渲染，钟摆式左右运镜 + 呼吸推近。配 `rose.splat`（8MB）和 `splat-render.js`（MIT，[antimatter15/splat](https://github.com/antimatter15/splat) 定制版）。
 - **`index.html`（粒子版）**——Canvas 2D 粒子堆出来的花束：近黑冷调背景、细白线框立方体、珊瑚红花头带金色反光。整束缓慢自转 + 呼吸式推近，绽放后定妆停留。
 
 ## 怎么给她打开
@@ -25,8 +26,45 @@ python -m http.server 8000
 
 然后访问：
 
+- 照片版：`http://localhost:8000/index_photo.html`（`#play` 跳过点击，`#still` 定格）
 - 泼溅版：`http://localhost:8000/index_splat.html`（`?play=1` 跳过点击，`?still=1` 定格）
 - 粒子版：`http://localhost:8000/index.html`（`#play` 跳过点击，`#still` 定格）
+
+## 照片转 3D 版（`index_photo.html`）
+
+素材由 `dl/prep_photo.py` 生成——从小红书截图里裁掉 App 界面、GrabCut 抠花束、
+剔掉紧贴花束的礼品袋黑缎带、缩放、提亮，输出 `col.jpg` + `msk.png`，再内嵌进页面：
+
+```bash
+python dl/prep_photo.py <输出目录>
+```
+
+**蒙版必须单独出。** 让页面按"接近黑"自己判断背景的话，暗红花瓣会被整片啃掉——
+原照片花瓣暗到 p10 亮度只有 13。
+
+立体化的几个关键常量（都在页面顶部）：
+
+| 常量 | 作用 | 说明 |
+| --- | --- | --- |
+| `DEPTH` / `INFL_P` | 充气高度 / 曲线指数 | 离剪影边缘越远鼓得越高，边缘收到 0。`DEPTH` 调 0 就退回一张纸片 |
+| `RELIEF` | 亮度微浮雕 | 亮的地方往前顶。只影响几何，不影响法线 |
+| `AMB` / `DIF` / `LX,LY,LZ` | 环境光 / 漫反射 / 光源方向 | 光源固定在世界坐标里，一转动明暗就变 |
+| `BACK_Z` / `BACK_DIM` | 背面壳的厚度比 / 亮度 | 有背面壳，转到侧面才是个有体积的东西 |
+| `AZ_LIM` | 方位角限位 | 照片只有正面，转到背后是编的。超出有橡皮筋阻力并自动弹回 |
+
+踩过的坑：
+
+- **投影用的是 `FOV/(FOV+D)`，所以 +z 是「远离镜头」。** 一开始把正面壳建在 +z，
+  背面壳就一直赢深度测试、从正面壳的缝里透出来，满屏麻点。做消融实验（关光照 /
+  关背面壳 / 关浮雕）一步就定位到了，靠肉眼猜了两轮都猜错。
+- **法线要用单独重度模糊的那份高度场。** 浮雕吃的是照片高频纹理（纸纤维、花瓣边缘），
+  直接差分会把法线打乱，亮面炸出一片白麻点。几何用轻磨的，法线用重磨的。
+- **取样要按步长铺网格，不能"每像素按概率丢弃"。** 粒子数少于源像素时，概率丢弃
+  会随机留下一片洞。
+- **背面壳要加一点固定深度偏置。** 轮廓处两层壳的高度都趋近 0，会在那里交汇互抢
+  深度，渲出来是一圈麻点。
+- **不做背面剔除，改成压暗。** 剔掉的话侧缘只剩稀疏的背面壳，会露出一排麻点；
+  反正方位角已经限住，转不到真正的背后。
 
 ## 调参
 
@@ -67,20 +105,20 @@ python -m http.server 8000
 
 ### 泼溅版（`index_splat.html`）
 
-相机运镜在 `splat-render.js` 的 `carousel` 分支（搜「七夕定制运镜」）：
+TripoSplat 从单张图生成的是**正面浮雕**，不是能整周转的实心花束：输入 `roseflower.jpg` 是插画、没有背面信息，高斯点在最薄轴上大约只有高度的 1/3。页面现在会按包围盒自动对准这一面（`fitSplatCamera`）；钟摆运镜绕这条视线左右摆。**不要改成整周 yaw**，转到侧面/背面会变扁或消失。若换一张真实拍摄、带阴影的花束照片再跑 `run_rose.py`，体积通常会厚一些，但单图仍然补不全背面。
 
 | 参数 | 作用 | 说明 |
 | --- | --- | --- |
-| `defaultViewMatrix` 里的 `z=2.45` | 相机距离 | 调小更近更大，调大更远 |
-| 俯角 `-0.065` | 相机俯仰 | 正=往下看，负=往上 |
-| 摆动 `sin(ct*0.22)*0.26` | 左右运镜 | 幅度 0.26 ≈ ±15°。模型是单面薄壳，**别改成整周环绕**，转到背面会消失 |
-| 呼吸 `translate4` 的 z 项 | 推近拉远 | ±0.12 的呼吸感 |
+| `roseCam.dist`（自动算） | 相机距离 | 按花束高度 × 1.78。想手动改近改远，改 `fitSplatCamera` 里的 `1.78` |
+| `roseCam.lift` | 轻微俯视 | `dist * 0.11`，像低头看花 |
+| 摆动 `sin(ct*0.22)*0.28` | 左右运镜 | 约 ±16°。**别改成整周环绕** |
+| 呼吸 `breathe` | 推近拉远 | `±6%` 距离 |
 
 3D 模型来自 [`dl/triposplat`](dl/triposplat) 里跑 TripoSplat 生成，输入图是仓库根目录的 `roseflower.jpg`：
 
 ```bash
 cd dl/triposplat
-python run_rose.py ../../roseflower.jpg 262144   # 输出 roseflower_262144.splat → 覆盖根目录 rose.splat
+python run_rose.py ../../roseflower.jpg 262144   # 写出 roseflower_262144.splat 并覆盖根目录 rose.splat
 ```
 
 权重从 ModelScope 下（`modelscope download VAST-AI-Research/TripoSplat --local_dir dl/triposplat/ckpts`，约 4.2GB，只下这一次）。
