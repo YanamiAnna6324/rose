@@ -176,7 +176,7 @@
   var TAU = Math.PI * 2;
   // 照片是室内欠曝的，色板整体偏暗，加色渲染前统一提一档。
   // 四类分开给：它们在原照片里的曝光差得很远。
-  var GAIN_ROSE = 2.55;
+  var GAIN_ROSE = 1.15;
   var GAIN_STAR = 1.20;
   var GAIN_LEAF = 1.70;
   var GAIN_WRAP = 1.05;
@@ -186,8 +186,8 @@
   var DOME_R   = 0.95;    // 花球水平半径
   var DOME_FY  = 0.86;    // 竖向压扁
   var CAP      = 2.23;    // 球冠张角，> pi/2 表示花包到侧下方
-  var ROSES    = 26;      // 花头数量
-  var HEAD_R   = 0.195;   // 单朵花头半径。太大就糊成一片，分不出一朵一朵
+  var ROSES    = 21;      // 花头数量
+  var HEAD_R   = 0.205;   // 单朵花头半径。太大就糊成一片，分不出一朵一朵
   var ROSE_GAIN = 0.95;   // 花瓣亮度系数
 
   // 包装纸锥
@@ -203,8 +203,13 @@
 
   // 渲染
   var INT      = 0.950;   // 单粒子加色强度：调高会整团糊成死白
-  var SPLAT    = 0.56;   // 单粒子铺开的总能量。1.0 = 只是把一个像素摊成 2x2；
-                         // 调大整团更密实，调小回到噼里啪啦的噪点
+  var SPLAT    = 0.56;    // 单粒子铺开的总能量。1.0 = 只是把一个像素摊成 2x2；
+                          // 调大整团更密实，调小回到噼里啪啦的噪点
+  var EXT      = 0.0042;  // 红色消光强度：越厚的红越吃掉绿蓝，红才压得深。
+                          // 调 0 会退回叠到发粉，调大红会发黑
+  var KNEE     = 0.00455; // 软削波上限的倒数（1/220）：累积到 220 就不再往上叠。
+                          // 上一版没有真上限，几百颗叠完都收敛到同一个值，
+                          // 结果调曝光完全无效、花瓣明暗也被压平
   var FADE     = 0.78;    // 余晖衰减，越大拖尾越短
   var BLOOM    = 0.26;    // 辉光强度
   var BUFDIV   = 1;       // 粒子缓冲降采样档位（1 = 半分辨率）。
@@ -263,14 +268,17 @@
      ============================================================ */
   var P = null;
   var COUNT = 0;
+  // 标记"周围飘的粒子"。这些在渲染时会额外走一段随时间变化的漂移 + 明灭，
+  // 花球本体不动，只有外围在飘——静止的尘埃看着像画上去的。
+  var AMB_ON = 0;
 
   function budget() {
     // 手机上缓冲被压到 46 万像素，粒子数得跟着提才有和桌面一样的密度。
     // 真跑不动的机器由 render 末尾的自适应降档兜底。
-    if (prefersReduced) return 90000;
-    if (isWeChat && isMobile) return 190000;
-    if (isMobile) return 215000;
-    return 265000;
+    if (prefersReduced) return 95000;
+    if (isWeChat && isMobile) return 215000;
+    if (isMobile) return 240000;
+    return 300000;
   }
 
   function buildBouquet(N) {
@@ -278,11 +286,12 @@
     var tx = new Float32Array(N), ty = new Float32Array(N), tz = new Float32Array(N);
     var ox = new Float32Array(N), oy = new Float32Array(N), oz = new Float32Array(N);
     var cr = new Float32Array(N), cg = new Float32Array(N), cb = new Float32Array(N);
-    var dl = new Float32Array(N), bg = new Uint8Array(N);
+    var dl = new Float32Array(N), bg = new Uint8Array(N), am = new Uint8Array(N);
     var n = 0;
 
     function push(x, y, z, r, g, b, big) {
       if (n >= N) return;
+      am[n] = AMB_ON;
       tx[n] = x; ty[n] = y; tz[n] = z;
       cr[n] = r; cg[n] = g; cb[n] = b;
       bg[n] = big ? 1 : 0;
@@ -348,7 +357,7 @@ var lump = 1
     var WHORL = [5, 6, 7, 9];          // 由外到内每轮的瓣数
     var WHORL_R = [1.00, 0.70, 0.46, 0.26];   // 每轮的半径尺度
     var WHORL_REFLEX = [-0.26, -0.06, 0.30, 0.72];  // 负=向外翻卷，正=向内合拢
-    var nRose = Math.floor(N * 0.350);
+    var nRose = Math.floor(N * 0.425);
     var perRose = Math.floor(nRose / ROSES);
 
     // 各轮的粒子配额。不能按面积（rw²）分——那样最内轮只剩 4% 的粒子，
@@ -439,7 +448,7 @@ var lump = 1
         // 照片里玫瑰整体就深，色板本身很窄，直接用会糊成一块平的红布，
         // 一朵一朵的分界全没了。花心压暗、瓣缘提亮才看得出是花。
         var c1 = purify(palAt(PAL_ROSE, 0.20 + cz * 0.80), 0.86);
-        var ramp = 0.28 + 1.34 * Math.pow(cz, 1.25);
+        var ramp = 0.14 + 1.62 * Math.pow(cz, 1.40);
         R = c1[0] * GAIN_ROSE * ramp;
         G = c1[1] * GAIN_ROSE * ramp;
         B = c1[2] * GAIN_ROSE * ramp;
@@ -465,7 +474,7 @@ var lump = 1
        - **多**：不够就是一堆黑窟窿，花头看着像贴上去的；
        - **暗**：亮了会把花头加色冲成粉白，红就没了；
        - **待在花头那层壳里**：埋进深处只是加一层均匀底光，填不到缝。 */
-    var nShell = Math.floor(N * 0.295);
+    var nShell = Math.floor(N * 0.275);
     // 一簇一簇地放，不是均匀撒。满天星本来就是一小球一小球的，
     // 均匀随机会渲染成一个光滑的白球——原视频那种绒毛感全靠这个成簇。
     var shClu = Math.max(220, Math.floor(nShell / 26));
@@ -497,7 +506,7 @@ var lump = 1
       for (var q2 = 0; q2 < perSh; q2++) {
         var qa = rng() * TAU, qb = Math.acos(rng() * 2 - 1), qs = Math.sin(qb);
         var qr = puffR * Math.pow(rng(), 0.40);
-        var e2 = (0.090 + 0.165 * rng()) * cluE;
+        var e2 = (0.115 + 0.205 * rng()) * cluE;
         var sp2 = scatterR(cpp[0] + qs * Math.cos(qa) * qr,
                            cpp[1] + Math.cos(qb) * qr,
                            cpp[2] + qs * Math.sin(qa) * qr, 0.105);
@@ -562,6 +571,7 @@ var lump = 1
 
 
     /* ---------- 4. 外缘雾气 + 放射花丝：毛茸茸的轮廓 ---------- */
+    AMB_ON = 1;   // 这一段之后都是"周围飘的"，渲染时会随时间漂移 + 明灭
     var nHaze = Math.floor(N * 0.026);
     var fil = Math.floor(nHaze * 0.50);
     var nMist = nHaze - fil;
@@ -590,6 +600,7 @@ var lump = 1
       }
     }
 
+    AMB_ON = 0;   // 回到花束本体
     /* ---------- 5. 叶片：灰绿，短，塞在花球下缘 ---------- */
     var nLeaf = Math.floor(N * 0.062);
     var LEAVES = 78;
@@ -674,6 +685,7 @@ var lump = 1
     }
 
     /* ---------- 8. 飘散尘埃：贴着花团，别撒满整个盒子 ---------- */
+    AMB_ON = 1;
     while (n < N) {
       var ad = rng() * TAU;
       var dd = capDir((n * 13) % 997, 997, 2.0);
@@ -686,6 +698,8 @@ var lump = 1
     }
 
 
+    AMB_ON = 0;
+
     // 洗牌：render 里按性能降档时是直接截断数组尾巴的，
     // 不打乱的话会把整段花茎和包装纸一次性砍掉。
     var A = [tx, ty, tz, ox, oy, oz, cr, cg, cb, dl];
@@ -695,10 +709,11 @@ var lump = 1
         var arr = A[ai], tmp = arr[q]; arr[q] = arr[w2]; arr[w2] = tmp;
       }
       var tb2 = bg[q]; bg[q] = bg[w2]; bg[w2] = tb2;
+      var ta2 = am[q]; am[q] = am[w2]; am[w2] = ta2;
     }
 
     COUNT = n;
-    return { tx: tx, ty: ty, tz: tz, ox: ox, oy: oy, oz: oz,
+    return { am: am, tx: tx, ty: ty, tz: tz, ox: ox, oy: oy, oz: oz,
              cr: cr, cg: cg, cb: cb, dl: dl, bg: bg };
   }
 
@@ -898,11 +913,12 @@ var lump = 1
 
     var tx = P.tx, ty = P.ty, tz = P.tz;
     var oxA = P.ox, oyA = P.oy, ozA = P.oz;
-    var crA = P.cr, cgA = P.cg, cbA = P.cb, dlA = P.dl, bgA = P.bg;
+    var crA = P.cr, cgA = P.cg, cbA = P.cb, dlA = P.dl, bgA = P.bg, amA = P.am;
     var jitAmp = 0.010 + 0.004 * Math.sin(t * 0.7);
     var f7 = (frame * 7) | 0;
     var n = drawCount;
     var bw4 = bw << 2;
+    var np4 = (bw * bh) << 2;
     var bwm = bw - 1, bhm = bh - 1;
 
     for (var i = 0; i < n; i++) {
@@ -940,10 +956,11 @@ var lump = 1
       if (gmul <= 0) continue;
       var idx = (sy * bw + sx) << 2;
       // 高光软拐点：越亮加得越少，密的地方压成米白而不是硬切到死白。
-      // 用 R 通道当亮度代理（这套配色里 R 恒为最高通道），
-      // 三个通道乘同一个系数，所以色相不会被压掉。
-      var kk = 1 - u8[idx] * 0.00345;
-      if (kk < 0.08) kk = 0.08;
+      // 用 R 通道当亮度代理（这套配色里 R 恒为最高通道）。
+      // 有明确上限的软削波：累积值渐近到 1/KNEE 就停。
+      // 原来那版 kk 有 0.08 的下限，等于没有上限，会一直往上爬。
+      var kk = 1 - u8[idx] * KNEE;
+      if (kk < 0) kk = 0;
       var g2 = gmul * kk;
       var vr = crA[i] * g2, vg = cgA[i] * g2, vb = cbA[i] * g2;
 
@@ -964,6 +981,24 @@ var lump = 1
         var h1 = vr * 0.42 * sprd, h2 = vg * 0.42 * sprd, h3 = vb * 0.42 * sprd;
         if (sx > 0) { var jl = idx - 4; u8[jl] += h1; u8[jl + 1] += h2; u8[jl + 2] += h3; }
         if (sy > 0) { var ju = idx - bw4; u8[ju] += h1; u8[ju + 1] += h2; u8[ju + 2] += h3; }
+      }
+    }
+
+    // 加色合成会把颜色越叠越白，堆不出"深红"。这里在整帧累积完之后统一
+    // 把偏红像素的绿蓝压下去，等效于"厚的红花团会吸收绿蓝光"。
+    // 必须放在这里、不能放进写入循环——循环里先写的粒子看到的累积量还很小，
+    // 而粒子数组是洗过牌的，等于一半的粒子逃过了压制。
+    // 只作用于本来就偏红的像素，不然奶油色的包装纸也会被一起压掉。
+    if (EXT > 0) {
+      for (var pi = 0; pi < np4; pi += 4) {
+        var R0 = u8[pi], G0 = u8[pi + 1];
+        if (R0 < 46 || G0 >= R0) continue;
+        var redness = (R0 - G0) / (R0 + 1);
+        if (redness < 0.14) continue;
+        var f2 = 1 - redness * R0 * EXT;
+        if (f2 < 0.22) f2 = 0.22;
+        u8[pi + 1] = G0 * f2;
+        u8[pi + 2] = u8[pi + 2] * f2;
       }
     }
 
