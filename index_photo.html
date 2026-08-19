@@ -1,6 +1,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
-<title>七夕快乐</title>
+<title>玫瑰</title>
 <meta name="theme-color" content="#000000">
 <style>
   html, body {
@@ -52,29 +52,15 @@
 
 <div id="stage"><canvas id="cv"></canvas></div>
 <div id="hint">按住拖动 · 转一转</div>
-<div class="cap" id="cap">
-  <div class="t" id="capT"></div>
-  <div class="n" id="capN"></div>
-  <div class="s" id="capS"></div>
-</div>
+<div class="cap" id="cap"></div>
 <div id="gate">
   <div class="g1">点一下，花开</div>
-  <div class="g2">一束不会凋谢的玫瑰</div>
   <div class="dot"></div>
 </div>
 
 <script>
 (function () {
   "use strict";
-
-  /* ============================================================
-     文案
-     ============================================================ */
-  var CONFIG = {
-    name: "徐雪莹",
-    title: "七夕快乐",
-    subtitle: "一束不会凋谢的玫瑰"
-  };
 
   /* ============================================================
      常量
@@ -119,10 +105,6 @@
   var gate = document.getElementById("gate");
   var capEl = document.getElementById("cap");
   var hintEl = document.getElementById("hint");
-  document.getElementById("capT").textContent = CONFIG.title;
-  document.getElementById("capN").textContent = CONFIG.name;
-  document.getElementById("capS").textContent = CONFIG.subtitle;
-
   function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
   function mulberry32(a) {
     return function () {

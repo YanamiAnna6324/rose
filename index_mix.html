@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#000000">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="format-detection" content="telephone=no">
-<title>七夕快乐</title>
+<title>玫瑰</title>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -96,18 +96,13 @@
 <div class="stage" id="stage">
   <canvas id="cv"></canvas>
   <div class="vignette"></div>
-  <div class="caption" id="caption">
-    <h1 id="titleText">七夕快乐</h1>
-    <p class="name" id="nameText">徐雪莹</p>
-    <p class="sub" id="subText">一束不会凋谢的玫瑰</p>
-  </div>
+  <div class="caption" id="caption"></div>
 </div>
 
 <div class="wechat-hint" id="wechatHint">若画面空白：右上角 ··· → 在浏览器打开</div>
 
 <div id="gate">
   <h2>点一下，花开</h2>
-  <p id="gateSub">一束不会凋谢的玫瑰</p>
   <div class="pulse"></div>
 </div>
 
@@ -116,15 +111,6 @@
 <script>
 (function () {
   "use strict";
-
-  /* ============================================================
-     文案：只改这里
-     ============================================================ */
-  var CONFIG = {
-    name: "徐雪莹",
-    title: "七夕快乐",
-    subtitle: "一束不会凋谢的玫瑰"
-  };
 
   /* ============================================================
      色板：全部取自 roseflower2.jpg
@@ -242,11 +228,6 @@
   var replay = document.getElementById("replay");
   var wechatHint = document.getElementById("wechatHint");
 
-  document.getElementById("titleText").textContent = CONFIG.title;
-  document.getElementById("nameText").textContent = CONFIG.name;
-  document.getElementById("subText").textContent = CONFIG.subtitle;
-  document.getElementById("gateSub").textContent = CONFIG.subtitle;
-  document.title = CONFIG.title + " · " + CONFIG.name;
   if (isWeChat) wechatHint.classList.add("show");
 
   /* ============================================================

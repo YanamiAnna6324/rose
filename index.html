@@ -77,17 +77,12 @@
 <div class="stage" id="stage">
   <canvas id="cv"></canvas>
   <div class="vignette"></div>
-  <div class="caption" id="caption">
-    <h1 id="titleText">七夕快乐</h1>
-    <p class="name" id="nameText">徐雪莹</p>
-    <p class="sub" id="subText">一束不会凋谢的玫瑰</p>
-  </div>
+  <div class="caption" id="caption"></div>
 </div>
 
 
 <div id="gate">
   <h2>点一下，花开</h2>
-  <p id="gateSub">一束不会凋谢的玫瑰</p>
   <div class="pulse"></div>
 </div>
 
@@ -95,15 +90,6 @@
 <script>
 (function () {
   "use strict";
-
-  /* ============================================================
-     文案：只改这里
-     ============================================================ */
-  var CONFIG = {
-    name: "徐雪莹",
-    title: "七夕快乐",
-    subtitle: "一束不会凋谢的玫瑰"
-  };
 
   /* ============================================================
      常量
@@ -168,12 +154,6 @@
   var ctx = cv.getContext("2d", { alpha: false });
   var gate = document.getElementById("gate");
   var caption = document.getElementById("caption");
-
-  document.getElementById("titleText").textContent = CONFIG.title;
-  document.getElementById("nameText").textContent = CONFIG.name;
-  document.getElementById("subText").textContent = CONFIG.subtitle;
-  document.getElementById("gateSub").textContent = CONFIG.subtitle;
-  document.title = CONFIG.title + " · " + CONFIG.name;
 
   /* ============================================================
      工具
