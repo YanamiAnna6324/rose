@@ -1,45 +1,38 @@
-# 七夕粒子玫瑰花束
+# 七夕玫瑰花束
 
-照着 `dl/vid_raw.mp4` 复刻：近黑冷调背景、细白线框立方体，里面是一束由几十万颗粒子堆出来的玫瑰花束——珊瑚红的花头（外层花瓣带金色反光）、奶白色的满天星、灰绿的叶、白色包装纸颈、深枣红的花茎。整束缓慢自转 + 呼吸式推近拉远，颗粒一直在轻微沸腾；绽放后定妆停留，不自动重播。
+两个版本，都是纯前端单页，无 CDN、无外链字体，微信内置浏览器能直接跑：
 
-单文件 `index.html`，纯 Canvas 2D，没有 Three.js、没有 CDN、没有外链字体，微信内置浏览器能直接跑。
-
-改文案只动 [`index.html`](index.html) 顶部的 `CONFIG`：
-
-```js
-var CONFIG = {
-  name: "徐雪莹",
-  title: "七夕快乐",
-  subtitle: "一束不会凋谢的玫瑰"
-};
-```
+- **`index_splat.html`（3D 高斯泼溅版，推荐）**——真正的 3D 花束：用 [TripoSplat](https://github.com/VAST-AI-Research/TripoSplat) 从一张玫瑰照片生成 26 万颗 3D 高斯点，浏览器里 WebGL 实时渲染，钟摆式左右运镜 + 呼吸推近。配 `rose.splat`（8MB）和 `splat-render.js`（MIT，[antimatter15/splat](https://github.com/antimatter15/splat) 定制版）。
+- **`index.html`（粒子版）**——Canvas 2D 粒子堆出来的花束：近黑冷调背景、细白线框立方体、珊瑚红花头带金色反光。整束缓慢自转 + 呼吸式推近，绽放后定妆停留。
 
 ## 怎么给她打开
 
-微信里请发 **https 链接**，不要发 `index.html` 文件。微信会把 HTML 当附件，不会当网页跑。
+微信里请发 **https 链接**，不要发 HTML 文件。微信会把 HTML 当附件，不会当网页跑。
 
 - 先「点一下，花开」（微信需要一次触摸才允许动画跑）
 - 画面铺满整屏，竖屏横屏都自适应
 - 若白屏：点右上角 `···` → **在浏览器打开**
 
-**别发本机的 `localhost`。** 她手机连不到你电脑。把 `index.html` 传到静态托管拿一条公网 https 链接（见「部署」一节），或者保底：本机 `#play` 全屏绽放后录一段发微信。
+**别发本机的 `localhost`。** 她手机连不到你电脑。把页面文件传到静态托管拿一条公网 https 链接（见「部署」一节），或者保底：本机 `?play=1` 全屏绽放后录一段发微信。
 
 ## 本机预览
 
-用浏览器打开 `index.html`，或在本目录执行：
+用浏览器打开，或在本目录执行：
 
 ```bash
 python -m http.server 8000
 ```
 
-然后访问 `http://localhost:8000`。
+然后访问：
 
-- `#play` 跳过「点一下」直接绽放，录屏用
-- `#still` 定住不转（也关掉淡入淡出循环），方便调参对比
+- 泼溅版：`http://localhost:8000/index_splat.html`（`?play=1` 跳过点击，`?still=1` 定格）
+- 粒子版：`http://localhost:8000/index.html`（`#play` 跳过点击，`#still` 定格）
 
 ## 调参
 
-都在 `index.html` 顶部的常量区。改完刷新即可。
+### 粒子版（`index.html`）
+
+都在文件顶部的常量区。改完刷新即可。
 
 | 常量 | 作用 | 说明 |
 | --- | --- | --- |
@@ -72,11 +65,31 @@ python -m http.server 8000
 - **放射状指数抖动必须封顶。** `-log(rng)` 在 `rng→0` 时能到 10 以上，粒子会被甩出五倍半径，整个盒子里飘满雪点。
 - **淡出黑场要在「复制合成」之后画。** `render` 末尾的黑场遮罩画在 `drawBox` 之后，否则会被下一帧的 `copy` 覆盖掉。
 
+### 泼溅版（`index_splat.html`）
+
+相机运镜在 `splat-render.js` 的 `carousel` 分支（搜「七夕定制运镜」）：
+
+| 参数 | 作用 | 说明 |
+| --- | --- | --- |
+| `defaultViewMatrix` 里的 `z=2.45` | 相机距离 | 调小更近更大，调大更远 |
+| 俯角 `-0.065` | 相机俯仰 | 正=往下看，负=往上 |
+| 摆动 `sin(ct*0.22)*0.26` | 左右运镜 | 幅度 0.26 ≈ ±15°。模型是单面薄壳，**别改成整周环绕**，转到背面会消失 |
+| 呼吸 `translate4` 的 z 项 | 推近拉远 | ±0.12 的呼吸感 |
+
+3D 模型来自 [`dl/triposplat`](dl/triposplat) 里跑 TripoSplat 生成，输入图是仓库根目录的 `roseflower.jpg`：
+
+```bash
+cd dl/triposplat
+python run_rose.py ../../roseflower.jpg 262144   # 输出 roseflower_262144.splat → 覆盖根目录 rose.splat
+```
+
+权重从 ModelScope 下（`modelscope download VAST-AI-Research/TripoSplat --local_dir dl/triposplat/ckpts`，约 4.2GB，只下这一次）。
+
 ## 部署成微信能点的链接
 
 ### 静态托管（最稳）
 
-把 `index.html` 单独当作站点首页传上去即可，不需要 Python。
+粒子版只传 `index.html`；泼溅版要传 `index_splat.html` + `splat-render.js` + `rose.splat`（三个放同目录）。都不需要 Python。
 
 1. **最稳：** 阿里云 OSS / 腾讯云 COS 静态网站，或 Gitee Pages
 2. **没有云账号：** Cloudflare Pages 碰运气；不行就让她「用浏览器打开」
@@ -100,18 +113,24 @@ python -m http.server 8000
 
 ## 操作
 
-| 动作 | 效果 |
+| 动作 | 效果（粒子版 / 泼溅版） |
 | --- | --- |
-| 点「点一下，花开」 | 开始汇聚（黑场淡入） |
-| 滑动手指 / 移动鼠标 | 轻微改变运镜 |
-| 「再绽放一次」或轻触画面 | 重新汇聚（先压黑场再淡入） |
-| 什么都不做 | 绽放后定妆停留，不自动重播 |
+| 点「点一下，花开」 | 黑场淡入，花束开始汇聚 / 直接展示 3D 花束 |
+| 滑动手指 / 移动鼠标 | 轻微改变运镜 / 拖动 3D 花束任意旋转 |
+| 「再绽放一次」 | 重新汇聚 / 黑场闪一下重置运镜 |
+| 什么都不做 | 定妆停留，不自动重播 |
 
 ## 目录里的其它东西
 
-`dl/` 是抓参考视频留下的工作目录（**已在 .gitignore 里，不进仓库**）：
+仓库根目录：
+- `roseflower.jpg` —— 生成 3D 花束的输入照片（TripoSplat 用它）
+- `rose.splat` —— 3D 花束（26 万高斯，8MB），泼溅版页面加载它
+- `splat-render.js` —— 高斯泼溅渲染器（定制自 [antimatter15/splat](https://github.com/antimatter15/splat)，MIT，协议文本在 `SPLAT_LICENSE`）
+
+`dl/` 是工作目录（**已在 .gitignore 里，不进仓库**）：
 
 - `vid_raw.mp4` —— 原视频（1280×704，15 秒）。抖音的播放链接会过期，想看或重下用它
 - `fetch.cjs` —— 重新抓视频的脚本（`npm i puppeteer-core` 后 `node fetch.cjs`，用本机 Chrome 访问页面拿真实播放地址）
 - `analyze.py` / `ascii.py` —— 帧分析脚本（色彩、运镜、ASCII 构图）
-- `shot3.cjs` —— 本页面截图验证脚本（`npm i puppeteer-core` 后 `node dl/shot3.cjs`，默认 4:3 视口截 6 张到 `dl/shots2/`，可用 `SHOT_PLAN` / `URL` 环境变量改）
+- `triposplat/` —— TripoSplat 推理仓库 + 权重（4.2GB，`run_rose.py` 生成 splat）
+- `shot3.cjs` / `shot4.cjs` / `shot5.cjs` / `shot6.cjs` —— 页面截图/交互验证脚本（`npm i puppeteer-core` 后运行，截图到 `dl/shots2/`）
