@@ -23,6 +23,12 @@
     background: #000; overflow: hidden;
   }
   canvas { display: block; width: 100%; height: 100%; }
+  /* 暗角：原视频四角压得很暗，中上偏亮 */
+  .vignette {
+    position: absolute; inset: 0; pointer-events: none;
+    background:
+      radial-gradient(ellipse at 50% 44%, transparent 0 46%, rgba(0, 0, 2, .24) 76%, rgba(0, 0, 2, .68) 100%);
+  }
   .caption {
     position: absolute; left: 50%; bottom: 11%;
     width: 88%; transform: translateX(-50%);
@@ -89,6 +95,7 @@
 
 <div class="stage" id="stage">
   <canvas id="cv"></canvas>
+  <div class="vignette"></div>
   <div class="caption" id="caption">
     <h1 id="titleText">七夕快乐</h1>
     <p class="name" id="nameText">徐雪莹</p>
@@ -150,6 +157,10 @@
   var BLOOM    = 0.26;    // 辉光强度
   var RISE     = 1.90;    // 单粒子汇聚时长
   var JMASK    = 4095;
+
+  // 黑场节奏：定妆静置后淡出黑场再自动重开（原视频结尾就是淡出黑场）
+  var LOOP_IDLE = 4.5;    // 定妆后静置秒数
+  var FADE_SEC  = 1.1;    // 淡入/淡出时长（秒）
 
   var prefersReduced = window.matchMedia &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -320,6 +331,10 @@ var lump = 1
         var R = 242 + 8 * pale;
         var G = 40 + 166 * pale;
         var B = 30 + 158 * pale;
+        // 偶发金色反光：外层受光花瓣上的暖金星点（原视频花瓣边缘有金橙高光）
+        if (pale > 0.55 && rng() < 0.035) {
+          R = 255; G = 168 + 56 * rng(); B = 90;
+        }
         // 花心额外提亮，好让红色从白色填充里透出来
         var sh = (0.52 + 0.30 * xs + 0.14 * u * u * u) * (0.84 + 0.16 * (1 - tsel)) * ROSE_GAIN;
         var lit = 0.70 + 0.30 * (px * 0.6 + py * 0.8);
@@ -540,6 +555,7 @@ var lump = 1
   var bcv, bctx, bw, bh, img, u8, u32;
   var scv, sctx, sw, sh;
   var gcv, gctx;
+  var bgc = null;   // 预渲染的冷调背景渐变，一帧一次 drawImage，零额外开销
   var scale = 1, cx = 0, cy = 0;
 
   var JIT = new Float32Array(JMASK + 4);
@@ -579,6 +595,22 @@ var lump = 1
     gctx.fillStyle = "#000";
     gctx.fillRect(0, 0, W, H);
 
+    // 背景：保持近黑的冷调（原视频底色偏蓝紫），中间偏上一团冷光 + 底部一丝暖意
+    bgc = document.createElement("canvas");
+    bgc.width = W; bgc.height = H;
+    var bg = bgc.getContext("2d");
+    var g1 = bg.createRadialGradient(W * 0.5, H * 0.40, 0, W * 0.5, H * 0.40, Math.max(W, H) * 0.62);
+    g1.addColorStop(0, "rgba(36,28,70,0.16)");
+    g1.addColorStop(0.5, "rgba(17,13,36,0.07)");
+    g1.addColorStop(1, "rgba(0,0,0,0)");
+    bg.fillStyle = g1;
+    bg.fillRect(0, 0, W, H);
+    var g2 = bg.createRadialGradient(W * 0.5, H * 0.62, 0, W * 0.5, H * 0.62, Math.min(W, H) * 0.52);
+    g2.addColorStop(0, "rgba(54,17,28,0.09)");
+    g2.addColorStop(1, "rgba(0,0,0,0)");
+    bg.fillStyle = g2;
+    bg.fillRect(0, 0, W, H);
+
     // 横屏按高度装下整个立方体；竖屏按宽度让花束占满画面，
     // 盒子的角会被切掉一点——视频里本来也是这样的取景。
     scale = Math.min(bw * 0.315, bh * 0.3533);
@@ -598,7 +630,7 @@ var lump = 1
   }
   var BOXE = [[0,1],[2,3],[4,5],[6,7],[0,2],[1,3],[4,6],[5,7],[0,4],[1,5],[2,6],[3,7]];
 
-  function drawBox(a, e, alphaMul) {
+  function drawBox(a, e, alphaMul, sc) {
     var ca = Math.cos(a), sa = Math.sin(a), ce = Math.cos(e), se = Math.sin(e);
     var k = W / bw;
     var pts = [];
@@ -609,7 +641,7 @@ var lump = 1
       var Y = v[1] * ce + Z * se;
       var D = -v[1] * se + Z * ce;
       var s = FOV / (FOV + D);
-      pts.push([(cx + X * s * scale) * k, (cy - Y * s * scale) * k, D]);
+      pts.push([(cx + X * s * sc) * k, (cy - Y * s * sc) * k, D]);
     }
     ctx.lineWidth = Math.max(1, W / 1000);
     ctx.lineCap = "round";
@@ -631,6 +663,7 @@ var lump = 1
      ============================================================ */
   var started = false, startT = 0, frame = 0, captionShown = false;
   var drawCount = 0, msAvg = 16, rafId = 0;
+  var black = 1, fadePhase = "none", fadeT0 = 0;   // 黑场遮罩状态
 
   function reset() {
     startT = performance.now();
@@ -644,6 +677,15 @@ var lump = 1
     gctx.fillRect(0, 0, W, H);
   }
 
+  // 重开：先压黑场再淡入，对应原视频结尾的淡出黑场
+  function softReset() {
+    reset();
+    if (STILL || prefersReduced) { black = 0; fadePhase = "none"; return; }
+    black = 1;
+    fadePhase = "in";
+    fadeT0 = performance.now();
+  }
+
   function render(now) {
     rafId = requestAnimationFrame(render);
     var t0 = performance.now();
@@ -654,8 +696,23 @@ var lump = 1
     pxCur += (pxAim - pxCur) * 0.06;
     pyCur += (pyAim - pyCur) * 0.06;
 
+    // 黑场节奏：淡入 → 绽放 → 静置 → 淡出 → 重开
+    if (fadePhase === "in") {
+      black = Math.max(0, 1 - (now - fadeT0) / 1000 / FADE_SEC);
+      if (black <= 0) { black = 0; fadePhase = "none"; }
+    } else if (fadePhase === "out") {
+      black = Math.min(1, (now - fadeT0) / 1000 / FADE_SEC);
+      if (black >= 1) { softReset(); return; }
+    } else if (captionShown && started && !STILL && !prefersReduced && t > 5.6 + LOOP_IDLE) {
+      fadePhase = "out";
+      fadeT0 = now;
+    }
+
     var a = az + (STILL ? 0 : t * SPIN) + pxCur * 0.42;
-    var e = elv + pyCur * 0.16;
+    // 呼吸式运镜：整体轻微推近拉远 + 上下浮动，模拟原视频的手持呼吸感
+    var breathe = 1 + 0.028 * Math.sin(t * 0.55) + 0.016 * Math.sin(t * 0.23 + 1.1);
+    var e = elv + pyCur * 0.16 + 0.020 * Math.sin(t * 0.31 + 0.6);
+    var sc = scale * breathe;
     var ca = Math.cos(a), sa = Math.sin(a), ce = Math.cos(e), se = Math.sin(e);
 
     u32.fill(0xFF000000);
@@ -694,9 +751,9 @@ var lump = 1
       var D = -py * se + Z * ce;
 
       var s = FOV / (FOV + D);
-      var sx = (cx + X * s * scale) | 0;
+      var sx = (cx + X * s * sc) | 0;
       if (sx < 0 || sx >= bw) continue;
-      var sy = (cy - Y * s * scale) | 0;
+      var sy = (cy - Y * s * sc) | 0;
       if (sy < 0 || sy >= bh) continue;
 
       var gmul = INT * amp * (0.52 + 0.78 * (s - 0.72));
@@ -738,7 +795,16 @@ var lump = 1
     ctx.globalCompositeOperation = "copy";
     ctx.drawImage(gcv, 0, 0);
     ctx.globalCompositeOperation = "source-over";
-    drawBox(a, e, clamp(t * 0.5, 0, 1));
+    if (bgc) ctx.drawImage(bgc, 0, 0);
+    drawBox(a, e, clamp(t * 0.5, 0, 1), sc);
+
+    // 结尾淡出黑场 / 开场淡入
+    if (black > 0.004) {
+      ctx.globalAlpha = black;
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = 1;
+    }
 
     if (!captionShown && t > 5.6) {
       captionShown = true;
@@ -753,7 +819,7 @@ var lump = 1
       else if (msAvg < 17 && drawCount < COUNT) drawCount = Math.min(COUNT, Math.floor(drawCount * 1.06) + 800);
     }
     frame++;
-    window.__rose = { ms: msAvg, draw: drawCount, total: COUNT };
+    window.__rose = { ms: msAvg, draw: drawCount, total: COUNT, black: black, phase: fadePhase, t: t };
   }
 
   /* ============================================================
@@ -772,13 +838,15 @@ var lump = 1
     if (started) return;
     started = true;
     gate.classList.add("gone");
+    if (STILL || prefersReduced) { black = 0; fadePhase = "none"; }
+    else { black = 1; fadePhase = "in"; fadeT0 = performance.now(); }
     reset();
   }
 
   gate.addEventListener("click", start);
   gate.addEventListener("touchend", function (ev) { ev.preventDefault(); start(); }, { passive: false });
-  replay.addEventListener("click", function (ev) { ev.stopPropagation(); reset(); });
-  cv.addEventListener("click", function () { if (started) reset(); });
+  replay.addEventListener("click", function (ev) { ev.stopPropagation(); softReset(); });
+  cv.addEventListener("click", function () { if (started) softReset(); });
 
   function aim(clientX, clientY) {
     var r = stage.getBoundingClientRect();

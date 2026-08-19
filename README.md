@@ -1,9 +1,8 @@
 # 七夕粒子玫瑰花束
 
-照着 `dl/vid_raw.mp4` 复刻：黑底、细白线框立方体，里面是一束由几十万颗粒子堆出来的玫瑰花束——珊瑚红的花头、奶白色的满天星、灰绿的叶、白色包装纸颈、深枣红的花茎，整束缓慢自转，颗粒一直在轻微沸腾。
+照着 `dl/vid_raw.mp4` 复刻：近黑冷调背景、细白线框立方体，里面是一束由几十万颗粒子堆出来的玫瑰花束——珊瑚红的花头（外层花瓣带金色反光）、奶白色的满天星、灰绿的叶、白色包装纸颈、深枣红的花茎。整束缓慢自转 + 呼吸式推近拉远，颗粒一直在轻微沸腾；定妆静置几秒后淡出黑场再自动重开，结尾节奏跟原视频一致。
 
 单文件 `index.html`，纯 Canvas 2D，没有 Three.js、没有 CDN、没有外链字体，微信内置浏览器能直接跑。
-`streamlit_app.py` 是外壳，只负责把这个页面整屏嵌进去，好在 Streamlit Cloud 上拿一条公网 https 链接。
 
 改文案只动 [`index.html`](index.html) 顶部的 `CONFIG`：
 
@@ -23,8 +22,7 @@ var CONFIG = {
 - 画面铺满整屏，竖屏横屏都自适应
 - 若白屏：点右上角 `···` → **在浏览器打开**
 
-**别发本机的 `localhost`。** 她手机连不到你电脑。要么用下面的 Streamlit Cloud 链接，
-要么把 `index.html` 传到静态托管——两条路都在「部署」一节。
+**别发本机的 `localhost`。** 她手机连不到你电脑。把 `index.html` 传到静态托管拿一条公网 https 链接（见「部署」一节），或者保底：本机 `#play` 全屏绽放后录一段发微信。
 
 ## 本机预览
 
@@ -37,7 +35,7 @@ python -m http.server 8000
 然后访问 `http://localhost:8000`。
 
 - `#play` 跳过「点一下」直接绽放，录屏用
-- `#still` 定住不转，方便调参对比
+- `#still` 定住不转（也关掉淡入淡出循环），方便调参对比
 
 ## 调参
 
@@ -52,6 +50,7 @@ python -m http.server 8000
 | `DOME_R` / `DOME_Y` / `CAP` | 花球半径 / 高度 / 球冠张角 | 花团的大小和上下边界 |
 | `WRAP_R` / `WRAP_TOP` / `WRAP_TIP` | 包装纸口径与上下端 | |
 | `SPIN` / `ELEV` | 自转速度 / 俯角 | |
+| `LOOP_IDLE` / `FADE_SEC` | 定妆静置秒数 / 淡入淡出时长 | 黑场循环节奏 |
 
 粒子数在 `budget()` 里按设备分档（桌面 26 万，微信手机 13 万）。`render()` 末尾有自适应降档：帧时间超过 30ms 会自动砍粒子，所以低端机不用手动改。
 
@@ -62,39 +61,18 @@ python -m http.server 8000
 - **花瓣沿螺旋按投影面积取样。** 玫瑰曲面往花心收得很快，均匀取 θ 会让花心密度高十几倍，加色后烧成白点，红色反而跑到边上。
 - **填充物要"多而暗"。** 少而亮会直接叠到死白。
 - **花头要填成实心。** 只贴一层壳的话，斜看时只亮出一道边，一朵花变成一弯月牙。
+- **淡出黑场要在「复制合成」之后画。** `render` 末尾的黑场遮罩画在 `drawBox` 之后，否则会被下一帧的 `copy` 覆盖掉。
 
 ## 部署成微信能点的链接
 
-### Streamlit Community Cloud（和 zodiacxMBTI 同一条路）
-
-```bash
-pip install -r requirements.txt
-streamlit run streamlit_app.py
-```
-
-上线：
-
-1. 推到**公开** GitHub 仓库
-2. [share.streamlit.io](https://share.streamlit.io) → New app → 选仓库 / 分支 / `streamlit_app.py`
-3. 拿到 `https://xxx.streamlit.app`，这条就是发微信的链接
-
-不需要任何 Secrets —— 页面没有后端、没有 API 调用，Python 那一层只是个壳。
-
-注意两点，发之前先说清楚：
-
-- **冷启动。** 应用闲置会休眠，她第一次打开可能要等半分钟白屏。发之前自己先点一次把它叫醒。
-- **国内网络。** `*.streamlit.app` 在国内微信里不是每次都通。要是她打不开，就走下面的静态托管，或者直接录屏发视频。
-
-`?play=1` 跳过「点一下」直接绽放，`?still=1` 定住不转（外壳会把它转成页面里的 hash）。
-
-### 静态托管（更稳，但要有云账号）
+### 静态托管（最稳）
 
 把 `index.html` 单独当作站点首页传上去即可，不需要 Python。
 
 1. **最稳：** 阿里云 OSS / 腾讯云 COS 静态网站，或 Gitee Pages
 2. **没有云账号：** Cloudflare Pages 碰运气；不行就让她「用浏览器打开」
 3. **GitHub Pages：** 国内微信里经常打不开，不当主方案
-4. **保底：** 本机 `#play` 全屏绽放后录一段竖屏发微信，视频一定能播
+4. **保底：** 本机 `#play` 全屏绽放后录一段发微信，视频一定能播
 
 ### 阿里云 OSS（摘要）
 
@@ -115,17 +93,16 @@ streamlit run streamlit_app.py
 
 | 动作 | 效果 |
 | --- | --- |
-| 点「点一下，花开」 | 开始汇聚 |
+| 点「点一下，花开」 | 开始汇聚（黑场淡入） |
 | 滑动手指 / 移动鼠标 | 轻微改变运镜 |
-| 「再绽放一次」或轻触画面 | 重新汇聚 |
+| 「再绽放一次」或轻触画面 | 重新汇聚（先压黑场再淡入） |
+| 什么都不做 | 定妆静置约 4.5 秒后淡出黑场，自动重开 |
 
 ## 目录里的其它东西
 
-`dl/` 是抓参考视频时留下的工作目录（**已在 .gitignore 里，不进仓库**）：`vid_raw.mp4` 是原视频，`frames/` 是抽帧。`dl/shot.cjs` 是调参时用的截图脚本（puppeteer-core + 本机 Chrome）：
+`dl/` 是抓参考视频留下的工作目录（**已在 .gitignore 里，不进仓库**）：
 
-```bash
-node dl/shot.cjs                     # 默认截 4 张到 dl/shots/
-SHOT_PLAN='[["x",9000]]' node dl/shot.cjs   # 只截一张，等 9 秒
-```
-
-根目录的 `cookies.txt` / `*.json` / `share.html` / `jina.txt` 也都是抓视频时的中间产物，跟页面本身无关，可以删。
+- `vid_raw.mp4` —— 原视频（1280×704，15 秒）。抖音的播放链接会过期，想看或重下用它
+- `fetch.cjs` —— 重新抓视频的脚本（`npm i puppeteer-core` 后 `node fetch.cjs`，用本机 Chrome 访问页面拿真实播放地址）
+- `analyze.py` / `ascii.py` —— 帧分析脚本（色彩、运镜、ASCII 构图）
+- `shot3.cjs` —— 本页面截图验证脚本（`npm i puppeteer-core` 后 `node dl/shot3.cjs`，默认 4:3 视口截 6 张到 `dl/shots2/`，可用 `SHOT_PLAN` / `URL` 环境变量改）
