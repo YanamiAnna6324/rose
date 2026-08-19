@@ -162,8 +162,8 @@
   var RISE     = 1.90;    // 单粒子汇聚时长
   var JMASK    = 4095;
 
-  // 黑场节奏：定妆静置后淡出黑场再自动重开（原视频结尾就是淡出黑场）
-  var LOOP_IDLE = 4.5;    // 定妆后静置秒数
+  // 黑场节奏：只播一次，绽放后定妆停留；手动重开才走黑场淡入
+  var LOOP_IDLE = 0;      // 定妆后静置秒数。0 = 不自动重播
   var FADE_SEC  = 1.1;    // 淡入/淡出时长（秒）
 
   var prefersReduced = window.matchMedia &&
@@ -797,7 +797,7 @@ var lump = 1
     } else if (fadePhase === "out") {
       black = Math.min(1, (now - fadeT0) / 1000 / FADE_SEC);
       if (black >= 1) { softReset(); return; }
-    } else if (captionShown && started && !STILL && !prefersReduced && t > 5.6 + LOOP_IDLE) {
+    } else if (LOOP_IDLE > 0 && captionShown && started && !STILL && !prefersReduced && t > 5.6 + LOOP_IDLE) {
       fadePhase = "out";
       fadeT0 = now;
     }
